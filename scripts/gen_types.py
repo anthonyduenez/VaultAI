@@ -75,7 +75,10 @@ def render() -> str:
         "",
     ]
     members = vars(domain)
-    enums = [v for v in members.values() if isinstance(v, type) and issubclass(v, StrEnum) and v.__module__ == domain.__name__]
+    # dict.fromkeys dedupes module-level aliases such as `_S = DocStatus`.
+    enums = list(dict.fromkeys(
+        v for v in members.values() if isinstance(v, type) and issubclass(v, StrEnum) and v.__module__ == domain.__name__
+    ))
     for enum in enums:
         values = [m.value for m in enum]
         out.append(f"export type {enum.__name__} = " + " | ".join(f'"{v}"' for v in values) + ";")
@@ -89,8 +92,9 @@ def render() -> str:
     out.append("export const LEGAL_DOC_TYPES: DocType[] = [" + ", ".join(f'"{t.value}"' for t in sorted(domain.LEGAL_DOC_TYPES)) + "];")
     out.append("")
 
-    models = [v for v in members.values()
-              if isinstance(v, type) and issubclass(v, domain.ApiModel) and v is not domain.ApiModel]
+    models = list(dict.fromkeys(
+        v for v in members.values() if isinstance(v, type) and issubclass(v, domain.ApiModel) and v is not domain.ApiModel
+    ))
     for model in models:
         parent = model.__mro__[1]
         own = model.__annotations__.keys() if parent is not domain.ApiModel else None

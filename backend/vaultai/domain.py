@@ -350,6 +350,7 @@ class ExtractedField(ApiModel):
     ai_value: str | None
     raw_text: str | None
     currency: str | None = None
+    options: list[str] = Field(default_factory=list)
     confidence: float
     origin: FieldOrigin
     ai_origin: FieldOrigin
@@ -423,6 +424,7 @@ class AuditEntry(ApiModel):
     actor: str
     action: AuditAction
     doc_id: str | None = None
+    doc_filename: str | None = None
     field_key: str | None = None
     before: str | None = None
     after: str | None = None

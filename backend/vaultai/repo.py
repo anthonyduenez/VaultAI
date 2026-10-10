@@ -6,6 +6,7 @@ import json
 import sqlite3
 
 from vaultai.db import evidence_from_row
+from vaultai.schemas import ENUM_OPTIONS
 from vaultai.domain import (
     AuditEntry,
     CapturePage,
@@ -82,6 +83,7 @@ def field_from_row(row: sqlite3.Row) -> ExtractedField:
         ai_value=row["ai_value"],
         raw_text=row["raw_text"],
         currency=row["currency"],
+        options=list(ENUM_OPTIONS.get(row["key"], ())) if row["value_type"] == "enum" else [],
         confidence=row["confidence"],
         origin=FieldOrigin.HUMAN if edited else row["ai_origin"],
         ai_origin=row["ai_origin"],
@@ -156,11 +158,14 @@ def audit_from_row(row: sqlite3.Row) -> AuditEntry:
     return AuditEntry.model_validate(dict(row))
 
 
+AUDIT_SQL = "SELECT a.*, d.filename AS doc_filename FROM audit_log a LEFT JOIN documents d ON d.id = a.doc_id"
+
+
 def load_audit(conn: sqlite3.Connection, *, doc_id: str | None = None, limit: int = 100) -> list[AuditEntry]:
     if doc_id is None:
-        rows = conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))
+        rows = conn.execute(AUDIT_SQL + " ORDER BY a.id DESC LIMIT ?", (limit,))
     else:
-        rows = conn.execute("SELECT * FROM audit_log WHERE doc_id = ? ORDER BY id DESC LIMIT ?", (doc_id, limit))
+        rows = conn.execute(AUDIT_SQL + " WHERE a.doc_id = ? ORDER BY a.id DESC LIMIT ?", (doc_id, limit))
     return [audit_from_row(r) for r in rows]
 
 

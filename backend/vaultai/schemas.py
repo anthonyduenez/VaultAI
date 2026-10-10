@@ -248,3 +248,8 @@ SCHEMAS: dict[DocType, DocSchema] = {
 
 # Generic key-value pairs found on any document are stored as extra fields with this key prefix.
 KV_PREFIX = "kv:"
+
+# Enum fields share their options across document types (currency, signature status).
+ENUM_OPTIONS: dict[str, tuple[str, ...]] = {
+    spec.key: spec.options for schema in SCHEMAS.values() for spec in schema.fields if spec.options
+}

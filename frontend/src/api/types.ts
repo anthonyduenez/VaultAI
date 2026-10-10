@@ -10,9 +10,6 @@ export const DocTypeValues: DocType[] = ["check", "receipt", "invoice", "contrac
 export type DocStatus = "imported" | "processing" | "extracted" | "validated" | "ready" | "needs_review" | "approved" | "rejected" | "exported" | "failed";
 export const DocStatusValues: DocStatus[] = ["imported", "processing", "extracted", "validated", "ready", "needs_review", "approved", "rejected", "exported", "failed"];
 
-export type DocStatus = "imported" | "processing" | "extracted" | "validated" | "ready" | "needs_review" | "approved" | "rejected" | "exported" | "failed";
-export const DocStatusValues: DocStatus[] = ["imported", "processing", "extracted", "validated", "ready", "needs_review", "approved", "rejected", "exported", "failed"];
-
 export type Source = "upload" | "folder" | "sample" | "scanner" | "phone";
 export const SourceValues: Source[] = ["upload", "folder", "sample", "scanner", "phone"];
 
@@ -133,6 +130,7 @@ export interface ExtractedField {
   ai_value: string | null;
   raw_text: string | null;
   currency: string | null;
+  options: string[];
   confidence: number;
   origin: FieldOrigin;
   ai_origin: FieldOrigin;
@@ -206,6 +204,7 @@ export interface AuditEntry {
   actor: string;
   action: AuditAction;
   doc_id: string | null;
+  doc_filename: string | null;
   field_key: string | null;
   before: string | null;
   after: string | null;
