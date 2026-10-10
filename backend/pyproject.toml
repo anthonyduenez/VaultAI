@@ -1,0 +1,10 @@
+[project]
+name = "vaultai"
+version = "0.1.0"
+description = "Local document AI for business: private documents, verified action."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
