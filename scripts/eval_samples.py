@@ -20,15 +20,13 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND))
 
-from vaultai import db  # noqa: E402
+from vaultai.app import build_context  # noqa: E402
 from vaultai.config import REPO_ROOT, load_settings  # noqa: E402
-from vaultai.context import AppContext  # noqa: E402
 from vaultai.domain import Severity, Source, ValueType  # noqa: E402
 from vaultai.intake.ingest import ingest_bytes  # noqa: E402
 from vaultai.model.mock import MockModel  # noqa: E402
 from vaultai.pipeline.process import process_document, request_processing  # noqa: E402
 from vaultai.schemas import SCHEMAS  # noqa: E402
-from vaultai.storage import Storage  # noqa: E402
 
 SAMPLES = REPO_ROOT / "samples"
 GATES = {
@@ -62,12 +60,7 @@ def main() -> int:
     expected: dict[str, dict] = json.loads((SAMPLES / "expected.json").read_text())
     with tempfile.TemporaryDirectory(prefix="vaultai-eval-") as tmp:
         settings = replace(load_settings({}), data_dir=Path(tmp) / "data", egress_guard=False)
-        storage = Storage(settings)
-        storage.ensure_dirs()
-        conn = db.connect(settings.db_path)
-        db.init_db(conn)
-        conn.close()
-        ctx = AppContext(settings=settings, storage=storage, model=MockModel())
+        ctx = build_context(settings, MockModel())
 
         docs: dict[str, str] = {}
         preflight_rows = []
