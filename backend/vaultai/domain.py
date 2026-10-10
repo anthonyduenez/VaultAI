@@ -294,18 +294,19 @@ class ExportFormat(StrEnum):
 
 
 class ActionCategory(StrEnum):
-    NEEDS_REVIEW = "needs_review"
-    READY = "ready"
-    MISSING_INFO = "missing_info"
+    # Declaration order is the Action Center's display order: time-critical and security items first.
     RENEWAL = "renewal"
     PAYMENT_DUE = "payment_due"
-    OBLIGATION = "obligation"
+    INJECTION = "injection"
     AMOUNT_MISMATCH = "amount_mismatch"
-    DUPLICATE = "duplicate"
     UNSIGNED = "unsigned"
     RISKY_CLAUSE = "risky_clause"
-    INJECTION = "injection"
+    OBLIGATION = "obligation"
+    DUPLICATE = "duplicate"
+    MISSING_INFO = "missing_info"
     PROCESSING_FAILURE = "processing_failure"
+    NEEDS_REVIEW = "needs_review"
+    READY = "ready"
     RECENTLY_APPROVED = "recently_approved"
 
 

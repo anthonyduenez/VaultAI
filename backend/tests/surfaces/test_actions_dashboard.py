@@ -44,8 +44,8 @@ def test_action_center_maps_records_to_categories(ctx: AppContext) -> None:
         ("injection", "error", "Suspicious instructions found: evil.pdf", "Text tries to instruct the assistant."),
         ("processing_failure", "error", "Processing failed: broken.pdf", "The PDF could not be read."),
         ("renewal", "warning", "Notice due in 22 days", "Send non-renewal notice to BrightPath"),
-        ("needs_review", "warning", "Needs review: evil.pdf", None),
         ("missing_info", "warning", "Missing information: evil.pdf", "Invoice number is missing. Total is missing."),
+        ("needs_review", "warning", "Needs review: evil.pdf", None),
         ("ready", "info", "Ready to approve: fine.pdf", None),
         ("recently_approved", "info", "Approved: receipt.pdf", "Auto-approved by policy"),
     ]

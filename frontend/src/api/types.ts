@@ -76,8 +76,8 @@ export const CaptureStatusValues: CaptureStatus[] = ["active", "completed", "can
 export type ExportFormat = "xlsx" | "csv";
 export const ExportFormatValues: ExportFormat[] = ["xlsx", "csv"];
 
-export type ActionCategory = "needs_review" | "ready" | "missing_info" | "renewal" | "payment_due" | "obligation" | "amount_mismatch" | "duplicate" | "unsigned" | "risky_clause" | "injection" | "processing_failure" | "recently_approved";
-export const ActionCategoryValues: ActionCategory[] = ["needs_review", "ready", "missing_info", "renewal", "payment_due", "obligation", "amount_mismatch", "duplicate", "unsigned", "risky_clause", "injection", "processing_failure", "recently_approved"];
+export type ActionCategory = "renewal" | "payment_due" | "injection" | "amount_mismatch" | "unsigned" | "risky_clause" | "obligation" | "duplicate" | "missing_info" | "processing_failure" | "needs_review" | "ready" | "recently_approved";
+export const ActionCategoryValues: ActionCategory[] = ["renewal", "payment_due", "injection", "amount_mismatch", "unsigned", "risky_clause", "obligation", "duplicate", "missing_info", "processing_failure", "needs_review", "ready", "recently_approved"];
 
 export const DOC_TYPE_LABELS: Record<DocType, string> = {
   check: "Check",
