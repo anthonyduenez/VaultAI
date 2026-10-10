@@ -59,8 +59,8 @@ export function DashboardPage() {
             </div>
 
             <div className="grid-2">
-              <Card title="Upcoming deadlines" subtitle="Overdue and next 60 days" action={<Link to="/actions">Action Center</Link>}>
-                <DeadlineList items={d.upcoming_deadlines} today={today} empty="No open deadlines in the next 60 days." />
+              <Card title="Upcoming deadlines" subtitle="Overdue and next 30 days" action={<Link to="/actions">Action Center</Link>}>
+                <DeadlineList items={d.upcoming_deadlines} today={today} empty="No open deadlines in the next 30 days." />
               </Card>
               <Card title="Contract renewals" subtitle="Renewals, notice periods, expirations">
                 <DeadlineList items={d.renewals} today={today} empty="No renewals or expirations coming up." />
@@ -147,12 +147,11 @@ function FinancialTotals({ totals }: { totals: Dashboard["financial_totals"] }) 
 }
 
 function TypeBars({ byType }: { byType: Dashboard["by_type"] }) {
-  const rows = [...byType].filter((r) => r.count > 0).sort((a, b) => b.count - a.count);
-  if (rows.length === 0) return <EmptyState title="No documents yet" />;
-  const max = Math.max(...rows.map((r) => r.count));
+  if (byType.length === 0) return <EmptyState title="No documents yet" />;
+  const max = Math.max(...byType.map((r) => r.count));
   return (
     <ul className="bar-list">
-      {rows.map((row) => (
+      {byType.map((row) => (
         <li key={row.doc_type}>
           <Link to={`/documents?type=${row.doc_type}`} className="bar-row" aria-label={`${DOC_TYPE_LABELS[row.doc_type]}: ${row.count}`}>
             <DocTypeBadge type={row.doc_type} />

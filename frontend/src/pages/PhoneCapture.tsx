@@ -1,8 +1,8 @@
 import { CircleCheck, Smartphone, Wifi, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiFailure, cancelPhoneSession, getPhoneSession, startPhonePairing } from "../api/client";
-import { useNow } from "../api/hooks";
+import { ApiFailure, cancelPhoneSession, errorMessage, getPhoneSession, startPhonePairing } from "../api/client";
+import { dataOf, useNow, useResource } from "../api/hooks";
 import type { CaptureSession, PhonePairing } from "../api/types";
 import { useSystemStatus } from "../components/Layout";
 import { useToast } from "../components/Toast";
@@ -29,30 +29,15 @@ export function PhoneCapture({ onImported }: { onImported: () => void }) {
   const [state, setState] = useState<PhoneState>({ kind: "idle" });
   const toast = useToast();
 
-  const sessionId = state.kind === "active" ? state.pairing.session.id : null;
-
-  useEffect(() => {
-    if (sessionId === null) return;
-    const controller = new AbortController();
-    const timer = window.setInterval(() => {
-      getPhoneSession(sessionId, controller.signal).then(
-        (session) => {
-          if (session.status === "completed") {
-            setState({ kind: "completed", session });
-            toast.push("accent", "Pages received from your phone and imported.");
-            onImported();
-          } else if (session.status === "expired" || session.status === "cancelled") {
-            setState({ kind: "ended", reason: session.status });
-          }
-        },
-        () => undefined,
-      );
-    }, POLL_MS);
-    return () => {
-      controller.abort();
-      window.clearInterval(timer);
-    };
-  }, [sessionId, onImported, toast]);
+  const onEnded = (session: CaptureSession) => {
+    if (session.status === "completed") {
+      setState({ kind: "completed", session });
+      toast.push("accent", "Pages received from your phone and imported.");
+      onImported();
+    } else if (session.status === "expired" || session.status === "cancelled") {
+      setState({ kind: "ended", reason: session.status });
+    }
+  };
 
   const start = async () => {
     setState({ kind: "starting" });
@@ -60,7 +45,7 @@ export function PhoneCapture({ onImported }: { onImported: () => void }) {
       setState({ kind: "active", pairing: await startPhonePairing() });
     } catch (err) {
       if (err instanceof ApiFailure && err.code === "phone_disabled") setState({ kind: "disabled" });
-      else setState({ kind: "error", message: err instanceof Error ? err.message : "Could not start pairing." });
+      else setState({ kind: "error", message: errorMessage(err, "Could not start pairing.") });
     }
   };
 
@@ -79,7 +64,7 @@ export function PhoneCapture({ onImported }: { onImported: () => void }) {
 
   switch (state.kind) {
     case "active":
-      return <ActivePairing pairing={state.pairing} onCancel={() => void cancel(state.pairing.session.id)} />;
+      return <ActivePairing pairing={state.pairing} onCancel={() => void cancel(state.pairing.session.id)} onEnded={onEnded} />;
     case "completed":
       return (
         <div className="phone-done" role="status">
@@ -126,8 +111,22 @@ export function PhoneCapture({ onImported }: { onImported: () => void }) {
   }
 }
 
-function ActivePairing({ pairing, onCancel }: { pairing: PhonePairing; onCancel: () => void }) {
+interface ActivePairingProps {
+  pairing: PhonePairing;
+  onCancel: () => void;
+  onEnded: (session: CaptureSession) => void;
+}
+
+function ActivePairing({ pairing, onCancel, onEnded }: ActivePairingProps) {
   const now = useNow(1000);
+  const { id } = pairing.session;
+  const { state } = useResource(`phone-session:${id}`, (signal) => getPhoneSession(id, signal), {
+    poll: (session) => (session === null || session.status === "active" ? POLL_MS : null),
+  });
+  const session = dataOf(state);
+  useEffect(() => {
+    if (session !== null && session.status !== "active") onEnded(session);
+  }, [session, onEnded]);
   const remaining = countdown(pairing.session.expires_at, now);
   return (
     <div className="phone-pairing">

@@ -66,19 +66,25 @@ export function isoDay(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function daysBetween(from: string, to: string): number | null {
+function daysBetween(from: string, to: string): number | null {
   const a = parseIsoDate(from);
   const b = parseIsoDate(to);
   if (!a || !b) return null;
   return Math.round((Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d)) / 86_400_000);
 }
 
-export interface DueLabel {
+interface DueLabel {
   text: string;
   tone: Tone;
 }
 
-const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+export const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+
+/** Trimmed form input for an optional API field: blank becomes null. */
+export function optionalText(text: string): string | null {
+  const trimmed = text.trim();
+  return trimmed === "" ? null : trimmed;
+}
 
 export function relativeDue(due: string, today: string): DueLabel {
   const days = daysBetween(today, due);

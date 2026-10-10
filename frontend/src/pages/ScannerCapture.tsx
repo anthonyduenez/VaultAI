@@ -5,6 +5,7 @@ import {
   cancelScanSession,
   createScanSession,
   deleteScanPage,
+  errorMessage,
   listScannerDevices,
   retakePage,
   scanPage,
@@ -14,6 +15,7 @@ import { DOC_TYPE_LABELS, DocTypeValues, type CaptureSession, type DocType, type
 import { type EditablePage, PageEditor, type PageSize } from "../components/PageEditor";
 import { EmptyState, Loaded } from "../components/States";
 import { useToast } from "../components/Toast";
+import { optionalText, plural } from "../lib/format";
 
 const DPI_OPTIONS = [150, 200, 300, 600] as const;
 
@@ -100,7 +102,7 @@ function ScannerSession({ devices, onImported }: ScannerSessionProps) {
     try {
       await work();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "The scanner action failed.");
+      setError(errorMessage(err, "The scanner action failed."));
     } finally {
       setBusy(null);
     }
@@ -110,7 +112,7 @@ function ScannerSession({ devices, onImported }: ScannerSessionProps) {
     guarded("scan", async () => {
       let active = session;
       if (!active) {
-        active = await createScanSession(deviceId);
+        active = await createScanSession({ device_id: deviceId });
         setSession(active);
       }
       apply(await scanPage(active.id, settings), "newest");
@@ -128,11 +130,11 @@ function ScannerSession({ devices, onImported }: ScannerSessionProps) {
     guarded("assemble", async () => {
       if (!session) return;
       const item = await assembleScan(session.id, {
-        title: name.trim() === "" ? null : name.trim(),
+        title: optionalText(name),
         doc_type_hint: category === "" ? null : category,
         pages: pages.map(({ id, rotation, crop }) => ({ id, rotation, crop })),
       });
-      toast.push("accent", `Combined ${pages.length} page${pages.length === 1 ? "" : "s"} into ${item.filename} and added it to the intake queue.`);
+      toast.push("accent", `Combined ${plural(pages.length, "page")} into ${item.filename} and added it to the intake queue.`);
       reset();
       onImported();
     });
@@ -222,7 +224,7 @@ function ScannerSession({ devices, onImported }: ScannerSessionProps) {
             </div>
             <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => void assemble()}>
               <FileStack size={15} aria-hidden="true" />
-              {busy === "assemble" ? "Combining…" : `Combine ${pages.length} page${pages.length === 1 ? "" : "s"} into PDF & import`}
+              {busy === "assemble" ? "Combining…" : `Combine ${plural(pages.length, "page")} into PDF & import`}
             </button>
             <button type="button" className="btn btn-ghost" disabled={busy !== null} onClick={() => void cancel()}>
               <X size={15} aria-hidden="true" /> Discard scan

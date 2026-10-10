@@ -1,8 +1,8 @@
 import { CheckCheck, CircleCheck, CircleX, ClipboardCheck, Keyboard, X } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { batchReview, getDocument, getReviewQueue } from "../api/client";
-import { dataOf, useResource } from "../api/hooks";
+import { batchReview, errorMessage, getDocument, getReviewQueue } from "../api/client";
+import { useResource } from "../api/hooks";
 import {
   DOC_TYPE_LABELS,
   type BatchReviewResult,
@@ -13,9 +13,10 @@ import {
 import { ConfidenceBadge, DocTypeBadge, StatusBadge } from "../components/Badge";
 import { DocumentWorkspace } from "../components/DocumentWorkspace";
 import { PageHeader } from "../components/PageHeader";
-import { EmptyState, ErrorState, Loaded, Spinner } from "../components/States";
+import { EmptyState, Loaded } from "../components/States";
 import { useToast } from "../components/Toast";
-import { formatMoney } from "../lib/format";
+import { formatMoney, optionalText, plural } from "../lib/format";
+import { useHotkeys } from "../lib/hotkeys";
 
 interface Section {
   title: string;
@@ -33,10 +34,6 @@ function sections(items: readonly DocumentSummary[]): Section[] {
 function groupLabel(group: ReviewGroup): string {
   const type = group.doc_type ? DOC_TYPE_LABELS[group.doc_type] : "Unclassified";
   return `${type} · ${group.counterparty ?? "unknown party"} (${group.doc_ids.length})`;
-}
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 }
 
 export function ReviewPage() {
@@ -76,21 +73,11 @@ function ReviewBoard({ data, onChanged }: { data: ReviewQueue; onChanged: () => 
     onChanged();
   };
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
-      const step = event.key === "j" ? 1 : event.key === "k" ? -1 : 0;
-      if (step === 0) return;
-      const index = ordered.findIndex((d) => d.id === currentId);
-      const next = ordered[index + step];
-      if (next) {
-        event.preventDefault();
-        select(next.id);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
+  const step = (by: number) => {
+    const next = ordered[ordered.findIndex((d) => d.id === currentId) + by];
+    if (next) select(next.id);
+  };
+  useHotkeys({ j: () => step(1), k: () => step(-1) });
 
   if (data.items.length === 0) {
     return (
@@ -171,7 +158,7 @@ function ReviewBoard({ data, onChanged }: { data: ReviewQueue; onChanged: () => 
                       <span className="row gap-1">
                         {doc.issue_count > 0 && (
                           <span className="issue-count" data-tone={doc.error_count > 0 ? "danger" : "warning"}>
-                            {doc.issue_count} issue{doc.issue_count === 1 ? "" : "s"}
+                            {plural(doc.issue_count, "issue")}
                           </span>
                         )}
                         <ConfidenceBadge value={doc.confidence} />
@@ -201,26 +188,12 @@ function ReviewBoard({ data, onChanged }: { data: ReviewQueue; onChanged: () => 
 
 function ReviewDetail({ id, onAdvance }: { id: string; onAdvance: () => void }) {
   const doc = useResource(`review-document:${id}`, (signal) => getDocument(id, signal));
-  const { state } = doc;
-  if (state.kind === "loading") {
-    return (
-      <div className="loading-block">
-        <Spinner label="Loading document…" />
-      </div>
-    );
-  }
-  const detail = dataOf(state);
-  if (detail === null) return state.kind === "error" ? <ErrorState error={state.error} onRetry={doc.reload} /> : null;
   return (
-    <DocumentWorkspace
-      detail={detail}
-      keyboard
-      compact
-      onDetail={doc.replace}
-      onReviewed={onAdvance}
-      onReload={onAdvance}
-      onDeleted={onAdvance}
-    />
+    <Loaded resource={doc} loadingLabel="Loading document…">
+      {(detail) => (
+        <DocumentWorkspace detail={detail} keyboard compact onDetail={doc.replace} onReviewed={onAdvance} onReload={onAdvance} onDeleted={onAdvance} />
+      )}
+    </Loaded>
   );
 }
 
@@ -244,13 +217,13 @@ function BatchBar({ items, checked, onCheck, onDone }: BatchBarProps) {
   const run = async (action: "approve" | "reject") => {
     setBusy(true);
     try {
-      const res = await batchReview({ doc_ids: selected.map((d) => d.id), action, note: note.trim() === "" ? null : note.trim() });
+      const res = await batchReview({ doc_ids: selected.map((d) => d.id), action, note: optionalText(note) });
       setResult({ res, names: new Map(selected.map((d) => [d.id, d.title ?? d.filename])) });
       const ok = res.results.filter((r) => r.ok).length;
       toast.push(ok === res.results.length ? "accent" : "danger", `${action === "approve" ? "Approved" : "Rejected"} ${ok} of ${res.results.length}.`);
       onDone();
     } catch (err) {
-      toast.push("danger", err instanceof Error ? err.message : "Batch review failed.");
+      toast.push("danger", errorMessage(err, "Batch review failed."));
     } finally {
       setBusy(false);
     }

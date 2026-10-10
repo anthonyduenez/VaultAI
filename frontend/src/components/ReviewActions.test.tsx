@@ -46,16 +46,27 @@ describe("ReviewActions", () => {
     expect(screen.queryByText(/unresolved error/)).toBeNull();
   });
 
-  it("rejects with the R shortcut", async () => {
+  it("rejects with the R shortcut, but not while typing the note", async () => {
     const calls = mockFetch(() => ({ body: makeDetail({ status: "rejected" }) }));
     renderActions({}, true);
-    await userEvent.setup().keyboard("r");
-    expect(calls.map((c) => c.body)).toEqual([{ action: "reject", note: null }]);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(/Reviewer note/), "r");
+    expect(calls).toEqual([]);
+
+    await user.click(document.body);
+    await user.keyboard("r");
+    expect(calls.map((c) => c.body)).toEqual([{ action: "reject", note: "r" }]);
   });
 
-  it("offers only reopen once a record is approved", () => {
-    renderActions({ status: "approved", error_count: 0 });
-    expect(screen.getByRole("button", { name: /Reopen/ })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+  it.each([
+    ["ready", ["Approve", "Reject", "Defer", "Reprocess", "Delete"]],
+    ["exported", ["Reopen", "Reprocess", "Delete"]],
+    ["failed", ["Reprocess", "Delete"]],
+    ["imported", ["Reprocess", "Delete"]],
+    ["processing", ["Delete"]],
+  ] as const)("offers the backend's allowed actions for a %s record", (status, buttons) => {
+    renderActions({ status, error_count: 0 });
+    expect(screen.getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(buttons);
   });
 });

@@ -15,7 +15,7 @@ import {
 import { Component, createContext, type ErrorInfo, type ReactNode, useContext } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { getSystemStatus } from "../api/client";
-import { type ResourceState, useResource } from "../api/hooks";
+import { dataOf, type ResourceState, useResource } from "../api/hooks";
 import type { SystemStatus } from "../api/types";
 import type { Tone } from "../lib/display";
 import { shortModelName } from "../lib/format";
@@ -27,11 +27,10 @@ export function useSystemStatusState(): ResourceState<SystemStatus> {
 }
 
 export function useSystemStatus(): SystemStatus | null {
-  const state = useContext(SystemStatusContext);
-  return state.kind === "loading" ? null : state.data;
+  return dataOf(useContext(SystemStatusContext));
 }
 
-export function BrandMark({ size = 28 }: { size?: number }) {
+function BrandMark({ size = 28 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
       <path d="M16 2 4 6.5v8.2c0 7.3 5.1 13.4 12 15.3 6.9-1.9 12-8 12-15.3V6.5L16 2Z" fill="currentColor" opacity="0.14" />

@@ -81,19 +81,13 @@ export function InjectionBadge() {
   );
 }
 
-export function Meter({ value, tone, label }: { value: number; tone: Tone; label: string }) {
+export function ConfidenceMeter({ value }: { value: number }) {
   const pct = Math.round(Math.min(1, Math.max(0, value)) * 100);
   return (
-    <span className="meter" data-tone={tone} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={label}>
-      <span className="meter-fill" style={{ width: `${pct}%` }} />
-    </span>
-  );
-}
-
-export function ConfidenceMeter({ value }: { value: number }) {
-  return (
     <span className="confidence">
-      <Meter value={value} tone={confidenceTone(value)} label="Confidence" />
+      <span className="meter" data-tone={confidenceTone(value)} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label="Confidence">
+        <span className="meter-fill" style={{ width: `${pct}%` }} />
+      </span>
       <span className="num">{formatPercent(value)}</span>
     </span>
   );

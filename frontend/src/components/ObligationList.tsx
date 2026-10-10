@@ -1,7 +1,6 @@
 import { CalendarCheck, Check, LocateFixed, Undo2, X } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { updateObligation } from "../api/client";
+import { errorMessage, updateObligation } from "../api/client";
 import type { Obligation, ObligationStatus } from "../api/types";
 import { OBLIGATION_KIND, OBLIGATION_STATUS } from "../lib/display";
 import { formatDate, relativeDue } from "../lib/format";
@@ -14,9 +13,8 @@ interface ObligationListProps {
   obligations: readonly Obligation[];
   today: string;
   onUpdated: (obligation: Obligation) => void;
-  showDocument?: boolean;
-  selectedId?: string | null;
-  onSelect?: (target: EvidenceTarget) => void;
+  selectedId: string | null;
+  onSelect: (target: EvidenceTarget) => void;
 }
 
 export function DueText({ due, today }: { due: string | null; today: string }) {
@@ -32,7 +30,7 @@ export function DueText({ due, today }: { due: string | null; today: string }) {
   );
 }
 
-export function ObligationList({ obligations, today, onUpdated, showDocument = false, selectedId = null, onSelect }: ObligationListProps) {
+export function ObligationList({ obligations, today, onUpdated, selectedId, onSelect }: ObligationListProps) {
   const [busy, setBusy] = useState<number | null>(null);
   const toast = useToast();
 
@@ -49,7 +47,7 @@ export function ObligationList({ obligations, today, onUpdated, showDocument = f
     try {
       onUpdated(await updateObligation(obligation.id, { status }));
     } catch (err) {
-      toast.push("danger", err instanceof Error ? err.message : "Could not update the obligation.");
+      toast.push("danger", errorMessage(err, "Could not update the obligation."));
     } finally {
       setBusy(null);
     }
@@ -80,14 +78,7 @@ export function ObligationList({ obligations, today, onUpdated, showDocument = f
                 <td>
                   <Badge>{OBLIGATION_KIND[ob.kind]}</Badge>
                 </td>
-                <td>
-                  {ob.description}
-                  {showDocument && (
-                    <div className="cell-sub">
-                      <Link to={`/documents/${ob.doc_id}`}>{ob.doc_filename}</Link>
-                    </div>
-                  )}
-                </td>
+                <td>{ob.description}</td>
                 <td>{ob.party ?? <span className="muted">—</span>}</td>
                 <td>
                   <DueText due={ob.due_date} today={today} />
@@ -96,7 +87,7 @@ export function ObligationList({ obligations, today, onUpdated, showDocument = f
                   <Badge tone={status.tone}>{status.label}</Badge>
                 </td>
                 <td className="cell-actions">
-                  {onSelect && evidence && (
+                  {evidence && (
                     <button type="button" className="btn btn-sm btn-icon-only" aria-label="Show in document" onClick={() => onSelect({ id: targetId, label: OBLIGATION_KIND[ob.kind], evidence })}>
                       <LocateFixed size={15} aria-hidden="true" />
                     </button>

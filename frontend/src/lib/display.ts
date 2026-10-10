@@ -68,33 +68,6 @@ export const STATUS: Record<DocStatus, Labeled & { hint: string }> = {
   failed: { label: "Failed", tone: "danger", hint: "Processing stopped. Reprocess or delete." },
 };
 
-/** Review actions the state machine allows from each status (mirrors backend TRANSITIONS). */
-export const REVIEW_ACTIONS: Record<DocStatus, readonly ReviewAction[]> = {
-  imported: [],
-  processing: [],
-  extracted: [],
-  validated: [],
-  ready: ["approve", "reject", "defer"],
-  needs_review: ["approve", "reject", "defer"],
-  approved: ["reopen"],
-  rejected: ["reopen"],
-  exported: ["reopen"],
-  failed: [],
-};
-
-export const REPROCESSABLE: Record<DocStatus, boolean> = {
-  imported: false,
-  processing: false,
-  extracted: false,
-  validated: false,
-  ready: true,
-  needs_review: true,
-  approved: true,
-  rejected: true,
-  exported: true,
-  failed: true,
-};
-
 export const REVIEW_ACTION: Record<ReviewAction, { label: string; past: string; key: string | null }> = {
   approve: { label: "Approve", past: "Approved", key: "A" },
   reject: { label: "Reject", past: "Rejected", key: "R" },
@@ -102,10 +75,10 @@ export const REVIEW_ACTION: Record<ReviewAction, { label: string; past: string; 
   reopen: { label: "Reopen", past: "Reopened", key: null },
 };
 
-export const SEVERITY: Record<Severity, Labeled & { icon: LucideIcon; rank: number }> = {
-  error: { label: "Error", tone: "danger", icon: CircleAlert, rank: 0 },
-  warning: { label: "Warning", tone: "warning", icon: TriangleAlert, rank: 1 },
-  info: { label: "Info", tone: "info", icon: Info, rank: 2 },
+export const SEVERITY: Record<Severity, Labeled & { icon: LucideIcon }> = {
+  error: { label: "Error", tone: "danger", icon: CircleAlert },
+  warning: { label: "Warning", tone: "warning", icon: TriangleAlert },
+  info: { label: "Info", tone: "info", icon: Info },
 };
 
 export const ISSUE_LABELS: Record<IssueCode, string> = {

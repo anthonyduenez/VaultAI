@@ -1,55 +1,29 @@
 import { LocateFixed, Pencil } from "lucide-react";
 import { type FormEvent, useId, useState } from "react";
-import { editField } from "../api/client";
+import { editField, errorMessage } from "../api/client";
 import type { DocumentDetail, ExtractedField, ValueType } from "../api/types";
-import { formatDate, formatDateTime, formatMoney } from "../lib/format";
+import { formatDate, formatDateTime, formatMoney, optionalText } from "../lib/format";
 import { ConfidenceMeter, OriginBadge } from "./Badge";
 import type { EvidenceTarget } from "./EvidenceViewer";
 import { useToast } from "./Toast";
 
-type ParseResult = { ok: true; value: string | null } | { ok: false; error: string };
-
 interface ValueSpec {
   input: "text" | "textarea" | "date" | "money" | "bool" | "enum";
   display: (value: string, field: ExtractedField) => string;
-  parse: (raw: string) => ParseResult;
 }
 
-const MONEY = /^-?\d+(\.\d+)?$/;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-const text = (raw: string): ParseResult => ({ ok: true, value: raw.trim() === "" ? null : raw.trim() });
-
+// Values are sent as typed; the server normalizes them and answers 422 with the message to show.
 const VALUE_SPEC: Record<ValueType, ValueSpec> = {
-  text: { input: "text", display: (v) => v, parse: text },
-  long_text: { input: "textarea", display: (v) => v, parse: text },
-  identifier: { input: "text", display: (v) => v, parse: text },
-  enum: { input: "enum", display: (v) => v.replaceAll("_", " "), parse: text },
-  money: {
-    input: "money",
-    display: (v, field) => formatMoney(v, field.currency),
-    parse: (raw) => {
-      const cleaned = raw.replace(/[\s,$€£]/g, "");
-      if (cleaned === "") return { ok: true, value: null };
-      return MONEY.test(cleaned) ? { ok: true, value: cleaned } : { ok: false, error: "Enter an amount such as 1250.00" };
-    },
-  },
-  date: {
-    input: "date",
-    display: (v) => formatDate(v),
-    parse: (raw) => {
-      if (raw === "") return { ok: true, value: null };
-      return DATE.test(raw) ? { ok: true, value: raw } : { ok: false, error: "Enter a date as YYYY-MM-DD" };
-    },
-  },
-  bool: {
-    input: "bool",
-    display: (v) => (v === "true" ? "Yes" : v === "false" ? "No" : v),
-    parse: (raw) => ({ ok: true, value: raw === "" ? null : raw }),
-  },
+  text: { input: "text", display: (v) => v },
+  long_text: { input: "textarea", display: (v) => v },
+  identifier: { input: "text", display: (v) => v },
+  enum: { input: "enum", display: (v) => v.replaceAll("_", " ") },
+  money: { input: "money", display: (v, field) => formatMoney(v, field.currency) },
+  date: { input: "date", display: (v) => formatDate(v) },
+  bool: { input: "bool", display: (v) => (v === "true" ? "Yes" : v === "false" ? "No" : v) },
 };
 
-export function displayFieldValue(field: ExtractedField, value: string | null): string | null {
+function displayFieldValue(field: ExtractedField, value: string | null): string | null {
   return value === null ? null : VALUE_SPEC[field.value_type].display(value, field);
 }
 
@@ -178,9 +152,12 @@ function FieldValue({ field }: { field: ExtractedField }) {
   );
 }
 
+// A date input can only hold YYYY-MM-DD; any other stored text would be invisible in it.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 function initialInput(field: ExtractedField): string {
   const value = field.value ?? "";
-  if (field.value_type === "date") return DATE.test(value) ? value : "";
+  if (field.value_type === "date") return ISO_DATE.test(value) ? value : "";
   return value;
 }
 
@@ -203,19 +180,14 @@ function FieldEditor({ docId, field, onCancel, onSaved }: FieldEditorProps) {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const parsed = spec.parse(raw);
-    if (!parsed.ok) {
-      setError(parsed.error);
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
-      const detail = await editField(docId, field.key, { value: parsed.value, note: note.trim() === "" ? null : note.trim() });
+      const detail = await editField(docId, field.key, { value: optionalText(raw), note: optionalText(note) });
       toast.push("accent", `${field.label} updated. The AI value is kept in the audit trail.`);
       onSaved(detail);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save this value.");
+      setError(errorMessage(err, "Could not save this value."));
       setSaving(false);
     }
   };

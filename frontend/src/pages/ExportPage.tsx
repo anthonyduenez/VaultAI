@@ -1,7 +1,7 @@
 import { Download, FileSpreadsheet, Lock, TriangleAlert } from "lucide-react";
 import { useId, useState } from "react";
 import { Link } from "react-router-dom";
-import { createExport, exportDownloadUrl, listExports, previewExport } from "../api/client";
+import { createExport, errorMessage, exportDownloadUrl, listExports, previewExport } from "../api/client";
 import { useDebounced, useResource } from "../api/hooks";
 import {
   DOC_TYPE_LABELS,
@@ -58,7 +58,7 @@ export function ExportPage() {
       history.reload();
       preview.reload();
     } catch (err) {
-      toast.push("danger", err instanceof Error ? err.message : "Export failed.");
+      toast.push("danger", errorMessage(err, "Export failed."));
     } finally {
       setCreating(false);
     }

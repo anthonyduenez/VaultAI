@@ -3,7 +3,7 @@ import { scanPageImageUrl } from "../api/client";
 import type { Box, PageEdit } from "../api/types";
 import { bboxToStyle, cropToInsets, type Insets, insetsToCrop } from "../lib/geometry";
 
-export type Rotation = NonNullable<PageEdit["rotation"]>;
+type Rotation = NonNullable<PageEdit["rotation"]>;
 
 export interface EditablePage {
   id: number;

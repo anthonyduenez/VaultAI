@@ -20,10 +20,9 @@ export function IssueList({ issues, fieldLabels, selectedId, onSelect }: IssueLi
       </EmptyState>
     );
   }
-  const sorted = [...issues].sort((a, b) => SEVERITY[a.severity].rank - SEVERITY[b.severity].rank);
   return (
     <ul className="issue-list">
-      {sorted.map((issue) => {
+      {issues.map((issue) => {
         const targetId = `issue:${issue.id}`;
         const evidence = issue.evidence;
         const fieldLabel = issue.field_key ? (fieldLabels.get(issue.field_key) ?? issue.field_key) : null;

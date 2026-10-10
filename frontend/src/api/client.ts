@@ -11,6 +11,7 @@ import type {
   DocType,
   DocumentDetail,
   DocumentList,
+  DocumentSort,
   DocumentSummary,
   ExportFilters,
   ExportJob,
@@ -18,6 +19,7 @@ import type {
   FieldEdit,
   IntakeItem,
   Metrics,
+  NewScanSession,
   Obligation,
   ObligationUpdate,
   PhonePairing,
@@ -29,7 +31,7 @@ import type {
   SystemStatus,
 } from "./types";
 
-export const API_BASE = "/api";
+const API_BASE = "/api";
 
 export class ApiFailure extends Error {
   readonly status: number;
@@ -45,7 +47,7 @@ export class ApiFailure extends Error {
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
 type QueryValue = string | number | boolean | null | undefined | readonly (string | number)[];
-export type Query = Record<string, QueryValue>;
+type Query = Record<string, QueryValue>;
 
 interface RequestOptions {
   method?: Method;
@@ -54,7 +56,7 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
-export function apiUrl(path: string, query?: Query): string {
+function apiUrl(path: string, query?: Query): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value === null || value === undefined || value === "") continue;
@@ -117,13 +119,17 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return (await response.json()) as T;
 }
 
-export async function requestVoid(path: string, options: RequestOptions = {}): Promise<void> {
+async function requestVoid(path: string, options: RequestOptions = {}): Promise<void> {
   await send(options, path);
 }
 
 export function toFailure(err: unknown): ApiFailure {
   if (err instanceof ApiFailure) return err;
-  return new ApiFailure(0, "client", err instanceof Error ? err.message : "Unexpected error.");
+  return new ApiFailure(0, "client", errorMessage(err, "Unexpected error."));
+}
+
+export function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
 }
 
 export const getSystemStatus = (signal?: AbortSignal) => request<SystemStatus>("/system/status", { signal });
@@ -154,8 +160,6 @@ export const removeIntake = (id: number) => requestVoid(`/intake/${id}`, { metho
 export const processIntake = (intakeIds: number[] | null) =>
   request<ProcessResult>("/intake/process", { method: "POST", body: { intake_ids: intakeIds } });
 
-export const DOCUMENT_SORTS = ["created_at", "doc_date", "total_amount", "confidence", "filename", "next_deadline"] as const;
-export type DocumentSort = (typeof DOCUMENT_SORTS)[number];
 export type SortOrder = "asc" | "desc";
 
 export interface DocumentQuery {
@@ -209,8 +213,8 @@ export const exportDownloadUrl = (id: string) => apiUrl(`/exports/${encodeURICom
 const scanPath = (sessionId: string) => `/scanner/sessions/${encodeURIComponent(sessionId)}`;
 
 export const listScannerDevices = (signal?: AbortSignal) => request<ScannerDevice[]>("/scanner/devices", { signal });
-export const createScanSession = (deviceId: string) =>
-  request<CaptureSession>("/scanner/sessions", { method: "POST", body: { device_id: deviceId } });
+export const createScanSession = (body: NewScanSession) =>
+  request<CaptureSession>("/scanner/sessions", { method: "POST", body });
 export const scanPage = (sessionId: string, req: ScanRequest) =>
   request<CaptureSession>(`${scanPath(sessionId)}/scan`, { method: "POST", body: req });
 export const retakePage = (sessionId: string, pageId: number, req: ScanRequest) =>

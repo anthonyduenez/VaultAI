@@ -31,7 +31,7 @@ async function walk(entry: FileSystemEntry, out: PickedFile[]): Promise<void> {
   }
 }
 
-export interface DroppedFiles {
+interface DroppedFiles {
   files: PickedFile[];
   fromFolder: boolean;
 }

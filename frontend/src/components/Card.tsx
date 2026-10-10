@@ -6,12 +6,11 @@ interface CardProps {
   action?: ReactNode;
   children: ReactNode;
   id?: string;
-  className?: string;
 }
 
-export function Card({ title, subtitle, action, children, id, className }: CardProps) {
+export function Card({ title, subtitle, action, children, id }: CardProps) {
   return (
-    <section className={className ? `card ${className}` : "card"} id={id} aria-label={title}>
+    <section className="card" id={id} aria-label={title}>
       <header className="card-header">
         <div>
           <h2 className="card-title">{title}</h2>

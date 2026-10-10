@@ -1,8 +1,8 @@
 import { CircleCheck, Lock, TriangleAlert } from "lucide-react";
 import { useId, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { deleteAllData, getAudit } from "../api/client";
-import { useResource } from "../api/hooks";
+import { deleteAllData, errorMessage, getAudit } from "../api/client";
+import { dataOf, useResource } from "../api/hooks";
 import { DOC_TYPE_LABELS, type AuditEntry, type SystemStatus } from "../api/types";
 import { Change } from "../components/AuditTimeline";
 import { Badge } from "../components/Badge";
@@ -16,7 +16,7 @@ import { formatDateTime } from "../lib/format";
 
 export function SettingsPage() {
   const state = useSystemStatusState();
-  const status = state.kind === "loading" ? null : state.data;
+  const status = dataOf(state);
   return (
     <div className="page">
       <PageHeader title="Settings & Privacy" subtitle="What runs where, how it is configured, and everything VaultAI has done." />
@@ -187,7 +187,7 @@ function DangerZone() {
       setConfirm("");
       navigate("/");
     } catch (err) {
-      toast.push("danger", err instanceof Error ? err.message : "Delete failed.");
+      toast.push("danger", errorMessage(err, "Delete failed."));
     } finally {
       setBusy(false);
     }

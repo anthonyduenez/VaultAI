@@ -1,6 +1,6 @@
 import type { Box } from "../api/types";
 
-export interface BoxStyle {
+interface BoxStyle {
   left: string;
   top: string;
   width: string;
@@ -26,7 +26,7 @@ export interface Insets {
   bottom: number;
 }
 
-export const NO_INSETS: Insets = { left: 0, top: 0, right: 0, bottom: 0 };
+const NO_INSETS: Insets = { left: 0, top: 0, right: 0, bottom: 0 };
 
 export function insetsToCrop(insets: Insets): Box | null {
   const { left, top, right, bottom } = insets;

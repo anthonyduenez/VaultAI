@@ -1,15 +1,17 @@
 import { FileSearch, LayoutGrid, List, Search, X } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { DOCUMENT_SORTS, type DocumentQuery, type DocumentSort, listDocuments, type SortOrder } from "../api/client";
+import { type DocumentQuery, listDocuments, type SortOrder } from "../api/client";
 import { useDebounced, useNow, useResource } from "../api/hooks";
 import {
   DOC_TYPE_LABELS,
   DocStatusValues,
   DocTypeValues,
+  DocumentSortValues,
   type DocStatus,
   type DocType,
   type DocumentList,
+  type DocumentSort,
   type DocumentSummary,
 } from "../api/types";
 import { ConfidenceBadge, DocTypeBadge, StatusBadge } from "../components/Badge";
@@ -68,7 +70,7 @@ function parseFilters(params: URLSearchParams): Filters {
     party: params.get("party") ?? "",
     within: positiveInt(params.get("within")),
     minConfidence: params.has("minconf") && conf > 0 && conf <= 100 ? conf : null,
-    sort: pick(DOCUMENT_SORTS, params.get("sort")) ?? "created_at",
+    sort: pick(DocumentSortValues, params.get("sort")) ?? "created_at",
     order: params.get("order") === "asc" ? "asc" : "desc",
     view: params.get("view") === "grid" ? "grid" : "list",
     page: positiveInt(params.get("page")) ?? 1,
@@ -157,8 +159,8 @@ export function DocumentsPage() {
                   </div>
                   <div className="field-inline">
                     <label htmlFor={`${ids}-sort`}>Sort</label>
-                    <select id={`${ids}-sort`} className="input" value={filters.sort} onChange={(e) => update({ sort: pick(DOCUMENT_SORTS, e.target.value) ?? "created_at" })}>
-                      {DOCUMENT_SORTS.map((s) => (
+                    <select id={`${ids}-sort`} className="input" value={filters.sort} onChange={(e) => update({ sort: pick(DocumentSortValues, e.target.value) ?? "created_at" })}>
+                      {DocumentSortValues.map((s) => (
                         <option key={s} value={s}>
                           {SORT_LABEL[s]}
                         </option>

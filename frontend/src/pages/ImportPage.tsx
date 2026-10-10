@@ -1,7 +1,7 @@
 import { FolderOpen, Package, ScanLine, Smartphone } from "lucide-react";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { importSamples, listIntake, type PickedFile, type UploadSource, uploadFiles } from "../api/client";
+import { errorMessage, importSamples, listIntake, type PickedFile, type UploadSource, uploadFiles } from "../api/client";
 import { useResource } from "../api/hooks";
 import type { IntakeItem } from "../api/types";
 import { DropZone } from "../components/DropZone";
@@ -11,6 +11,7 @@ import { Loaded } from "../components/States";
 import { Tabs, type TabSpec } from "../components/Tabs";
 import { useToast } from "../components/Toast";
 import { chunk } from "../lib/files";
+import { plural } from "../lib/format";
 import { PhoneCapture } from "./PhoneCapture";
 import { ScannerCapture } from "./ScannerCapture";
 
@@ -34,7 +35,7 @@ function describe(items: readonly IntakeItem[]): string {
   const duplicates = items.filter((i) => i.preflight === "duplicate").length;
   const parts = [`${accepted} accepted`];
   if (rejected > 0) parts.push(`${rejected} rejected (not stored)`);
-  if (duplicates > 0) parts.push(`${duplicates} duplicate${duplicates === 1 ? "" : "s"} (not stored again)`);
+  if (duplicates > 0) parts.push(`${plural(duplicates, "duplicate")} (not stored again)`);
   return parts.join(" · ");
 }
 
@@ -56,9 +57,9 @@ export function ImportPage() {
         setProgress({ done: results.length, total: files.length });
         intake.reload();
       }
-      toast.push("accent", `Imported ${files.length} file${files.length === 1 ? "" : "s"}: ${describe(results)}.`);
+      toast.push("accent", `Imported ${plural(files.length, "file")}: ${describe(results)}.`);
     } catch (err) {
-      toast.push("danger", err instanceof Error ? err.message : "Upload failed.");
+      toast.push("danger", errorMessage(err, "Upload failed."));
     } finally {
       setProgress(null);
       intake.reload();
@@ -72,7 +73,7 @@ export function ImportPage() {
       toast.push("accent", `Imported ${items.length} sample files: ${describe(items)}.`);
       intake.reload();
     } catch (err) {
-      toast.push("danger", err instanceof Error ? err.message : "Could not import the samples.");
+      toast.push("danger", errorMessage(err, "Could not import the samples."));
     } finally {
       setImportingSamples(false);
     }

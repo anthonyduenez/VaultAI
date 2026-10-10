@@ -36,6 +36,8 @@ export function useResource<T>(
   const loadRef = useRef(load);
   const pollRef = useRef(options.poll);
   const dataRef = useRef<T | null>(null);
+  // JSON of the data in the current "ready" state; null while loading or after a failed refresh.
+  const readyJson = useRef<string | null>(null);
 
   useEffect(() => {
     loadRef.current = load;
@@ -45,23 +47,32 @@ export function useResource<T>(
   useEffect(() => {
     const controller = new AbortController();
     let timer: number | undefined;
+    // A poll re-runs the load here instead of through state and sets state only when the data
+    // changed, so an unchanged poll does not re-render the tables below.
     const schedule = (data: T | null) => {
       const ms = pollRef.current?.(data) ?? null;
-      if (ms !== null) timer = window.setTimeout(() => setTick((t) => t + 1), ms);
+      if (ms !== null) timer = window.setTimeout(run, ms);
     };
-    loadRef.current(controller.signal).then(
-      (data) => {
-        if (controller.signal.aborted) return;
-        dataRef.current = data;
-        setState({ kind: "ready", data });
-        schedule(data);
-      },
-      (err: unknown) => {
-        if (controller.signal.aborted) return;
-        setState({ kind: "error", error: toFailure(err), data: dataRef.current });
-        schedule(dataRef.current);
-      },
-    );
+    const run = () =>
+      loadRef.current(controller.signal).then(
+        (data) => {
+          if (controller.signal.aborted) return;
+          const json = JSON.stringify(data);
+          if (json !== readyJson.current) {
+            readyJson.current = json;
+            dataRef.current = data;
+            setState({ kind: "ready", data });
+          }
+          schedule(data);
+        },
+        (err: unknown) => {
+          if (controller.signal.aborted) return;
+          readyJson.current = null;
+          setState({ kind: "error", error: toFailure(err), data: dataRef.current });
+          schedule(dataRef.current);
+        },
+      );
+    void run();
     return () => {
       controller.abort();
       window.clearTimeout(timer);
@@ -70,6 +81,7 @@ export function useResource<T>(
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
   const replace = useCallback((data: T) => {
+    readyJson.current = JSON.stringify(data);
     dataRef.current = data;
     setState({ kind: "ready", data });
   }, []);

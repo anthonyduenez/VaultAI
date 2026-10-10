@@ -2,9 +2,9 @@ import { BadgeCheck, CircleAlert, Download, ShieldAlert } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { originalUrl } from "../api/client";
 import { useNow } from "../api/hooks";
-import { LEGAL_DOC_TYPES, type DocumentDetail, type Obligation, type ReviewAction } from "../api/types";
+import { EDITABLE, LEGAL_DOC_TYPES, type DocumentDetail, type Obligation, type ReviewAction } from "../api/types";
 import { MODEL_KIND, RISK_LEVEL, ROUTE, SOURCE, STATUS } from "../lib/display";
-import { formatBytes, formatDateTime, formatMs, formatPercent, isoDay, shortHash, shortModelName } from "../lib/format";
+import { formatBytes, formatDateTime, formatMs, formatPercent, isoDay, plural, shortHash, shortModelName } from "../lib/format";
 import { AuditTimeline } from "./AuditTimeline";
 import { Badge, ConfidenceBadge, DocTypeBadge, InjectionBadge, StatusBadge } from "./Badge";
 import { ClauseList, LegalDisclaimer, SummaryPanel } from "./ClauseList";
@@ -39,16 +39,14 @@ export function DocumentWorkspace({ detail, onDetail, onReload, onDeleted, onRev
   useEffect(() => setTarget(null), [detail.id]);
 
   const fieldLabels = useMemo(() => new Map(detail.fields.map((f) => [f.key, f.label])), [detail.fields]);
-  const errorCount = detail.issues.filter((i) => i.severity === "error").length;
   const openObligations = detail.obligations.filter((o) => o.status === "open").length;
   const isLegal = detail.doc_type !== null && LEGAL_DOC_TYPES.includes(detail.doc_type);
-  const settled = detail.status !== "processing" && detail.status !== "imported";
   const selectedId = target?.id ?? null;
 
   const tabs: TabSpec<TabId>[] = [
     { id: "fields", label: "Fields", count: detail.fields.length },
     { id: "line_items", label: "Line items", count: detail.line_items.length },
-    { id: "issues", label: "Issues", count: detail.issues.length, tone: errorCount > 0 ? "danger" : detail.issues.length > 0 ? "warning" : undefined },
+    { id: "issues", label: "Issues", count: detail.issues.length, tone: detail.error_count > 0 ? "danger" : detail.issues.length > 0 ? "warning" : undefined },
     { id: "summary", label: "Summary & clauses", count: detail.clauses.length },
     { id: "obligations", label: "Obligations", count: openObligations },
     { id: "history", label: "History" },
@@ -109,7 +107,7 @@ export function DocumentWorkspace({ detail, onDetail, onReload, onDeleted, onRev
                 <strong>Extracted facts.</strong> Each value links to where it was read on the page. Corrections are recorded
                 with the original AI value.
               </p>
-              <FieldTable docId={detail.id} fields={detail.fields} editable={settled} selectedId={selectedId} onSelect={setTarget} onSaved={onDetail} />
+              <FieldTable docId={detail.id} fields={detail.fields} editable={EDITABLE.includes(detail.status)} selectedId={selectedId} onSelect={setTarget} onSaved={onDetail} />
             </>
           )}
           {tab === "line_items" && (
@@ -208,7 +206,7 @@ function DocumentHeader({ detail, provenanceOpen }: { detail: DocumentDetail; pr
           <dt>Source</dt>
           <dd>
             {SOURCE[detail.source]} · {formatBytes(detail.size_bytes)}
-            {detail.page_count !== null && ` · ${detail.page_count} page${detail.page_count === 1 ? "" : "s"}`}
+            {detail.page_count !== null && ` · ${plural(detail.page_count, "page")}`}
           </dd>
         </div>
       </dl>

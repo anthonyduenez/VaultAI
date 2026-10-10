@@ -1,10 +1,10 @@
 import { Inbox, Play, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { processIntake, removeIntake } from "../api/client";
+import { errorMessage, processIntake, removeIntake } from "../api/client";
 import type { IntakeItem } from "../api/types";
 import { PREFLIGHT, SOURCE } from "../lib/display";
-import { formatBytes } from "../lib/format";
+import { formatBytes, plural } from "../lib/format";
 import { Badge, DocTypeBadge, StatusBadge } from "./Badge";
 import { EmptyState, Spinner } from "./States";
 import { useToast } from "./Toast";
@@ -18,7 +18,7 @@ const MIME_LABEL: Record<string, string> = {
 };
 
 /** Accepted and stored, but not yet sent through the pipeline. */
-export const isQueued = (item: IntakeItem) => item.preflight === "accepted" && item.doc_status === "imported";
+const isQueued = (item: IntakeItem) => item.preflight === "accepted" && item.doc_status === "imported";
 export const isProcessing = (item: IntakeItem) => item.doc_status === "processing";
 
 interface IntakeQueueProps {
@@ -59,11 +59,11 @@ export function IntakeQueue({ items, onChanged }: IntakeQueueProps) {
     try {
       const ids = selectedQueued.length > 0 ? selectedQueued.map((i) => i.id) : null;
       const result = await processIntake(ids);
-      toast.push("info", `Processing ${result.queued.length} document${result.queued.length === 1 ? "" : "s"} on this device.`);
+      toast.push("info", `Processing ${plural(result.queued.length, "document")} on this device.`);
       setSelected(new Set());
       onChanged();
     } catch (err) {
-      toast.push("danger", err instanceof Error ? err.message : "Could not start processing.");
+      toast.push("danger", errorMessage(err, "Could not start processing."));
     } finally {
       setProcessing(false);
     }
@@ -75,7 +75,7 @@ export function IntakeQueue({ items, onChanged }: IntakeQueueProps) {
       await removeIntake(item.id);
       onChanged();
     } catch (err) {
-      toast.push("danger", err instanceof Error ? err.message : "Could not remove the item.");
+      toast.push("danger", errorMessage(err, "Could not remove the item."));
     } finally {
       setRemoving((prev) => {
         const next = new Set(prev);
@@ -89,7 +89,7 @@ export function IntakeQueue({ items, onChanged }: IntakeQueueProps) {
   const processLabel =
     selectedQueued.length > 0
       ? `Process ${processCount} selected`
-      : `Process ${processCount} queued document${processCount === 1 ? "" : "s"}`;
+      : `Process ${plural(processCount, "queued document")}`;
 
   return (
     <section className="card" aria-labelledby="intake-heading">
@@ -99,8 +99,8 @@ export function IntakeQueue({ items, onChanged }: IntakeQueueProps) {
             Intake queue
           </h2>
           <p className="card-subtitle" aria-live="polite">
-            {items.length} file{items.length === 1 ? "" : "s"} · {queued.length} queued · {counts.processing} processing ·{" "}
-            {counts.rejected} rejected · {counts.duplicates} duplicate{counts.duplicates === 1 ? "" : "s"}
+            {plural(items.length, "file")} · {queued.length} queued · {counts.processing} processing · {counts.rejected} rejected ·{" "}
+            {plural(counts.duplicates, "duplicate")}
           </p>
         </div>
         <button type="button" className="btn btn-primary" disabled={processCount === 0 || processing} onClick={() => void process()}>

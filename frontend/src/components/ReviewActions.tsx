@@ -1,8 +1,17 @@
 import { Check, Clock, type LucideIcon, RefreshCw, RotateCcw, Trash2, X } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
-import { deleteDocument, reprocessDocument, reviewDocument } from "../api/client";
-import type { DocumentDetail, DocumentSummary, ReviewAction } from "../api/types";
-import { REPROCESSABLE, REVIEW_ACTION, REVIEW_ACTIONS } from "../lib/display";
+import { useEffect, useId, useState } from "react";
+import { deleteDocument, errorMessage, reprocessDocument, reviewDocument } from "../api/client";
+import {
+  REPROCESSABLE,
+  REVIEW_ACTION_FROM,
+  ReviewActionValues,
+  type DocumentDetail,
+  type DocumentSummary,
+  type ReviewAction,
+} from "../api/types";
+import { REVIEW_ACTION } from "../lib/display";
+import { optionalText, plural } from "../lib/format";
+import { useHotkeys } from "../lib/hotkeys";
 import { useToast } from "./Toast";
 
 type Reviewable = Pick<DocumentSummary, "id" | "filename" | "status" | "error_count">;
@@ -32,10 +41,6 @@ const BUTTON_CLASS: Record<ReviewAction, string> = {
 
 type Busy = ReviewAction | "reprocess" | "delete" | null;
 
-function isTypingTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
-}
-
 export function ReviewActions({ doc, onReviewed, onReprocessed, onDeleted, keyboard = false }: ReviewActionsProps) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<Busy>(null);
@@ -51,7 +56,7 @@ export function ReviewActions({ doc, onReviewed, onReprocessed, onDeleted, keybo
     setConfirmDelete(false);
   }, [doc.id]);
 
-  const allowed = REVIEW_ACTIONS[doc.status];
+  const allowed = ReviewActionValues.filter((action) => REVIEW_ACTION_FROM[action].includes(doc.status));
   const noteRequired = doc.error_count > 0 && allowed.includes("approve");
   const approveBlocked = noteRequired && note.trim() === "";
 
@@ -62,36 +67,18 @@ export function ReviewActions({ doc, onReviewed, onReprocessed, onDeleted, keybo
     setBusy(action);
     setError(null);
     try {
-      const detail = await reviewDocument(doc.id, { action, note: note.trim() === "" ? null : note.trim() });
+      const detail = await reviewDocument(doc.id, { action, note: optionalText(note) });
       toast.push("accent", `${REVIEW_ACTION[action].past}: ${doc.filename}`);
       setNote("");
       onReviewed(detail, action);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "The action failed.");
+      setError(errorMessage(err, "The action failed."));
     } finally {
       setBusy(null);
     }
   };
 
-  const runRef = useRef(run);
-  useEffect(() => {
-    runRef.current = run;
-  });
-
-  useEffect(() => {
-    if (!keyboard) return;
-    const keys: Record<string, ReviewAction> = { a: "approve", r: "reject", d: "defer" };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
-      const action = keys[event.key.toLowerCase()];
-      if (action) {
-        event.preventDefault();
-        void runRef.current(action);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [keyboard]);
+  useHotkeys({ a: () => void run("approve"), r: () => void run("reject"), d: () => void run("defer") }, keyboard);
 
   const reprocess = async () => {
     setBusy("reprocess");
@@ -101,7 +88,7 @@ export function ReviewActions({ doc, onReviewed, onReprocessed, onDeleted, keybo
       toast.push("info", "Reprocessing locally. Your edits are kept and re-applied.");
       onReprocessed();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reprocess.");
+      setError(errorMessage(err, "Could not reprocess."));
     } finally {
       setBusy(null);
     }
@@ -114,7 +101,7 @@ export function ReviewActions({ doc, onReviewed, onReprocessed, onDeleted, keybo
       toast.push("info", `Deleted ${doc.filename} and its derived files. The audit trail remains.`);
       onDeleted();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete.");
+      setError(errorMessage(err, "Could not delete."));
       setBusy(null);
     }
   };
@@ -138,28 +125,26 @@ export function ReviewActions({ doc, onReviewed, onReprocessed, onDeleted, keybo
           />
           {noteRequired && (
             <p id={reasonId} className="hint" data-tone="danger">
-              This record has {doc.error_count} unresolved error{doc.error_count === 1 ? "" : "s"}. Approving it anyway needs a
+              This record has {plural(doc.error_count, "unresolved error")}. Approving it anyway needs a
               note so the audit trail shows why.
             </p>
           )}
         </div>
       )}
       <div className="row wrap gap-1">
-        {(["approve", "reject", "defer", "reopen"] as const)
-          .filter((action) => allowed.includes(action))
-          .map((action) => {
-            const Icon = ICON[action];
-            const { label, key } = REVIEW_ACTION[action];
-            return (
-              <button key={action} type="button" className={BUTTON_CLASS[action]} disabled={isDisabled(action)} onClick={() => void run(action)} aria-keyshortcuts={keyboard && key ? key : undefined}>
-                <Icon size={15} aria-hidden="true" />
-                {busy === action ? `${label}…` : label}
-                {keyboard && key && <kbd>{key}</kbd>}
-              </button>
-            );
-          })}
+        {allowed.map((action) => {
+          const Icon = ICON[action];
+          const { label, key } = REVIEW_ACTION[action];
+          return (
+            <button key={action} type="button" className={BUTTON_CLASS[action]} disabled={isDisabled(action)} onClick={() => void run(action)} aria-keyshortcuts={keyboard && key ? key : undefined}>
+              <Icon size={15} aria-hidden="true" />
+              {busy === action ? `${label}…` : label}
+              {keyboard && key && <kbd>{key}</kbd>}
+            </button>
+          );
+        })}
         <span className="spacer" />
-        {REPROCESSABLE[doc.status] && (
+        {REPROCESSABLE.includes(doc.status) && (
           <button type="button" className="btn btn-ghost" disabled={busy !== null} onClick={() => void reprocess()}>
             <RefreshCw size={15} aria-hidden="true" /> Reprocess
           </button>

@@ -1,7 +1,7 @@
 import { ArrowLeft, FileX } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { getDocument } from "../api/client";
-import { useResource } from "../api/hooks";
+import { dataOf, useResource } from "../api/hooks";
 import { DocumentWorkspace } from "../components/DocumentWorkspace";
 import { EmptyState, ErrorState, Spinner } from "../components/States";
 
@@ -18,15 +18,6 @@ export function DocumentPage() {
   );
 
   const { state } = doc;
-  if (state.kind === "loading") {
-    return (
-      <div className="page">
-        <div className="loading-block">
-          <Spinner label="Loading document…" />
-        </div>
-      </div>
-    );
-  }
   if (state.kind === "error" && state.error.status === 404) {
     return (
       <div className="page">
@@ -36,11 +27,17 @@ export function DocumentPage() {
       </div>
     );
   }
-  const detail = state.data;
+  const detail = dataOf(state);
   if (detail === null) {
     return (
       <div className="page">
-        {state.kind === "error" && <ErrorState error={state.error} onRetry={doc.reload} />}
+        {state.kind === "error" ? (
+          <ErrorState error={state.error} onRetry={doc.reload} />
+        ) : (
+          <div className="loading-block">
+            <Spinner label="Loading document…" />
+          </div>
+        )}
       </div>
     );
   }
