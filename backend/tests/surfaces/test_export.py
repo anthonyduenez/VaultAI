@@ -159,3 +159,42 @@ def test_export_list_newest_first(client: TestClient, app_ctx: AppContext) -> No
     listed = client.get("/api/exports").json()
     assert [j["id"] for j in listed] == [second["id"], first["id"]]
     assert (listed[0]["record_count"], listed[1]["record_count"]) == (1, 1)
+
+
+def test_detail_sheets_keep_each_records_rows_together_in_order(
+    client: TestClient, app_ctx: AppContext, fake_core: FakeCore
+) -> None:
+    first = approved(
+        app_ctx, filename="a.pdf", doc_date="2026-01-01",
+        fields=[field_row("vendor", "Acme", label="Vendor"), field_row("total", "10.00", label="Total")],
+        issues=[("missing_required", "warning", "A warning")],
+        obligations=[{"kind": "payment", "description": "A later", "due_date": "2026-12-01"}],
+    )
+    second = approved(
+        app_ctx, filename="b.pdf", doc_date="2026-02-01", fields=[field_row("vendor", "Birch", label="Vendor")],
+        issues=[("amount_mismatch", "error", "B error")],
+        obligations=[{"kind": "renewal", "description": "B only", "due_date": "2026-10-15"}],
+    )
+    with app_ctx.db() as conn:
+        conn.execute("INSERT INTO issues (doc_id, code, severity, message, created_at) "
+                     "VALUES (?, 'amount_mismatch', 'error', 'A error', '2026-10-01T12:00:00+00:00')", (first,))
+        conn.execute("INSERT INTO obligations (doc_id, kind, description, due_date, status, origin, created_at, "
+                     "updated_at) VALUES (?, 'payment', 'A sooner', '2026-11-01', 'open', 'rules', '', '')", (first,))
+    client.patch(f"/api/documents/{first}/fields/vendor", json={"value": "Acme Supply"})
+    client.post(f"/api/documents/{first}/review", json={"action": "approve", "note": "Checked"})
+
+    assert client.post("/api/exports/preview", json={}).json()["warnings"] == [
+        "2 approved records have validation errors a reviewer accepted with a note."
+    ]
+    wb = workbook(export(client)[1])
+    assert [(r["Document ID"], r["Human Edits"]) for r in rows(wb["Approved Records"])] == [(first, 1), (second, 0)]
+    assert [(r["Document ID"], r["Field"], r["Value"]) for r in rows(wb["Source Evidence"])] == [
+        (first, "Vendor", "Acme Supply"), (first, "Total", "10.00"), (second, "Vendor", "Birch"),
+    ]
+    assert [(r["Document ID"], r["Severity"], r["Message"]) for r in rows(wb["Validation Warnings"])] == [
+        (first, "error", "A error"), (first, "warning", "A warning"), (second, "error", "B error"),
+    ]
+    assert [(r["Document ID"], r["Description"], r["Due Date"]) for r in rows(wb["Obligations and Deadlines"])] == [
+        (first, "A sooner", datetime(2026, 11, 1)), (first, "A later", datetime(2026, 12, 1)),
+        (second, "B only", datetime(2026, 10, 15)),
+    ]

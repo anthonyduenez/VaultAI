@@ -9,10 +9,8 @@ from decimal import Decimal, InvalidOperation
 
 from vaultai.domain import DOC_TYPE_LABELS, ClauseRisk, DocType, IssueCode, RiskLevel, Severity
 from vaultai.schemas import SCHEMAS
+from vaultai.validation import INJECTION_CODES
 from vaultai.validation.rules import FieldView
-
-TITLE_KEYS = ("title", "form_title", "subject")
-_HIGH_RISK_ISSUES = frozenset({IssueCode.PROMPT_INJECTION, IssueCode.HIDDEN_TEXT})
 
 
 @dataclass(frozen=True)
@@ -35,7 +33,7 @@ def _value(fields: Mapping[str, FieldView], key: str | None) -> str | None:
 
 def risk_level(clause_risks: Iterable[ClauseRisk], issues: Iterable[tuple[IssueCode, Severity]]) -> RiskLevel:
     risks, issues = set(clause_risks), list(issues)
-    if ClauseRisk.PROFESSIONAL_REVIEW in risks or any(code in _HIGH_RISK_ISSUES for code, _ in issues):
+    if ClauseRisk.PROFESSIONAL_REVIEW in risks or any(code in INJECTION_CODES for code, _ in issues):
         return RiskLevel.HIGH
     if ClauseRisk.ATTENTION in risks or any(sev is Severity.ERROR for _, sev in issues):
         return RiskLevel.MEDIUM
@@ -52,7 +50,7 @@ def project(doc_type: DocType, fields: Mapping[str, FieldView], open_deadlines: 
     if schema.counterparty == "parties" and counterparty:
         counterparty = counterparty.split(";")[0].strip()
     label = DOC_TYPE_LABELS[doc_type]
-    title = next((v for k in TITLE_KEYS if (v := _value(fields, k))), None)
+    title = _value(fields, schema.title) or None
     if title is None and primary_id:
         title = f"{label} {primary_id}"
     elif title is None and counterparty:

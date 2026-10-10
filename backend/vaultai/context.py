@@ -17,6 +17,8 @@ from vaultai.storage import Storage
 class Queue(Protocol):
     def enqueue(self, doc_id: str) -> None: ...
 
+    async def stop(self) -> None: ...
+
 
 @dataclass
 class AppContext:

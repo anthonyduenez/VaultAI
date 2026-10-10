@@ -1,9 +1,9 @@
-"""End-to-end through the real core pipeline. Skipped until the core processing modules exist."""
+"""End-to-end through the real core pipeline."""
 
 from __future__ import annotations
 
-import importlib
 import io
+import re
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -14,26 +14,9 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from tests.surfaces.conftest import BASE_URL, CSRF
+from vaultai.app import create_app
 from vaultai.config import REPO_ROOT, Settings
-
-CORE_MODULES = (
-    "vaultai.intake.ingest", "vaultai.pipeline.queue", "vaultai.pipeline.process", "vaultai.model.factory",
-    "vaultai.parsing.ocr", "vaultai.metrics",
-)
-
-
-def _missing() -> list[str]:
-    missing = []
-    for name in CORE_MODULES:
-        try:
-            importlib.import_module(name)
-        except ImportError:
-            missing.append(name)
-    return missing
-
-
-MISSING = _missing()
-pytestmark = pytest.mark.skipif(bool(MISSING), reason=f"core processing modules not importable yet: {', '.join(MISSING)}")
+from vaultai.phone_app import create_phone_app
 
 DEMO = REPO_ROOT / "samples" / "demo"
 SETTLED = {"ready", "needs_review", "approved", "failed"}
@@ -41,8 +24,6 @@ SETTLED = {"ready", "needs_review", "approved", "failed"}
 
 @pytest.fixture
 def live(tmp_path: Path) -> Iterator[TestClient]:
-    from vaultai.app import create_app
-
     settings = Settings(data_dir=tmp_path / "data", ocr_engine="none", scanner_backend="mock", egress_guard=False,
                         phone_enabled=False, max_file_mb=2)
     with TestClient(create_app(settings), base_url=BASE_URL, headers=CSRF) as client:
@@ -123,11 +104,6 @@ def test_scanner_assembly_enters_intake_as_scanner(live: TestClient) -> None:
 
 
 def test_phone_submission_enters_intake_as_phone(tmp_path: Path) -> None:
-    import re
-
-    from vaultai.app import create_app
-    from vaultai.phone_app import create_phone_app
-
     settings = Settings(data_dir=tmp_path / "data", ocr_engine="none", scanner_backend="none", egress_guard=False,
                         phone_enabled=True, phone_host="192.168.1.10")
     desktop = TestClient(create_app(settings), base_url=BASE_URL, headers=CSRF)

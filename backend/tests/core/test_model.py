@@ -115,6 +115,19 @@ def test_grounded_model_value_is_kept_as_flagged_inert_text(settings):
     assert (doc(ctx, doc_id)["status"], doc(ctx, doc_id)["route"]) == ("needs_review", "model")
 
 
+def test_a_required_value_from_the_model_never_auto_approves_whatever_the_threshold(settings):
+    model = ScriptedModel(_extract_answer(lambda t: {"fields": [
+        {"key": "vendor", "value": "Zephyr Tools LLC", "line_id": _line(t, "Zephyr"), "quote": "Zephyr Tools LLC",
+         "confidence": 0.99}]}))
+    ctx = make_ctx(replace(settings, auto_approve_types=frozenset({DocType.INVOICE}), auto_approve_min_confidence=0.5), model)
+    by_rules = run(ctx, "rules.pdf", invoice_pdf(number="ZT-7"))
+    by_model = run(ctx, "model.pdf", _vendorless("Make checks payable to Zephyr Tools LLC"))
+    vendor = field(ctx, by_model, "vendor")
+    assert (vendor["ai_value"], vendor["ai_origin"], vendor["confidence"]) == ("Zephyr Tools LLC", "model", 0.85)
+    assert [(doc(ctx, d)["status"], doc(ctx, d)["approval_kind"]) for d in (by_rules, by_model)] == [
+        ("approved", "policy"), ("ready", None)]
+
+
 def test_uncited_or_misquoted_model_values_are_dropped(settings):
     model = ScriptedModel(_extract_answer(lambda t: {"fields": [
         {"key": "vendor", "value": "rm -rf /", "line_id": t.lines[0].id, "quote": "rm -rf /"},

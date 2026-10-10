@@ -53,6 +53,7 @@ def test_truncated_pdf_is_rejected_as_unsafe(mock_ctx):
     data = invoice_pdf()
     item = ingest(mock_ctx, "cut.pdf", data[: len(data) // 3])
     assert (item.preflight, item.error) == (PreflightStatus.REJECTED, "The file could not be parsed safely.")
+    assert (list(mock_ctx.storage.raw.iterdir()), list(mock_ctx.storage.tmp.iterdir())) == ([], [])
 
 
 def _png_header(width: int, height: int) -> bytes:

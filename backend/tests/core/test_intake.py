@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import replace
 
 import pytest
 
 from conftest import make_ctx
-from core.conftest import doc, ingest, invoice_pdf
-from vaultai.domain import DocStatus, PreflightStatus
+from core.conftest import ctx_with, doc, ingest, invoice_pdf
+from vaultai.domain import DocStatus, PreflightStatus, Source
 from vaultai.intake.filenames import display_name
+from vaultai.intake.ingest import ingest_samples
 from vaultai.parsing import isolate
 from vaultai.pipeline.process import process_document, request_processing
 from vaultai.storage import Storage, UnsafePath
@@ -44,11 +46,42 @@ def test_storage_refuses_paths_that_escape_and_never_overwrites(mock_ctx):
     assert (storage.raw / name).read_bytes() == b"first"
 
 
+def test_samples_are_the_visible_regular_files_in_demo(settings, tmp_path):
+    demo = tmp_path / "samples" / "demo"
+    (demo / "nested").mkdir(parents=True)
+    (demo / "b.pdf").write_bytes(invoice_pdf(number="B-1"))
+    (demo / "a.pdf").write_bytes(invoice_pdf(number="A-1"))
+    (demo / "big.pdf").write_bytes(b"%PDF-1.4\n" + b"0" * (1024 * 1024))
+    (demo / ".hidden.pdf").write_bytes(invoice_pdf(number="H-1"))
+    (demo / "nested" / "c.pdf").write_bytes(invoice_pdf(number="C-1"))
+    (tmp_path / "secret.pdf").write_bytes(invoice_pdf(number="S-1"))
+    (demo / "link.pdf").symlink_to(tmp_path / "secret.pdf")
+    ctx = ctx_with(settings, samples_dir=tmp_path / "samples", max_file_mb=1)
+    items = ingest_samples(ctx, batch_id="samples")
+    assert [(i.filename, i.source, i.preflight, i.error) for i in items] == [
+        ("a.pdf", Source.SAMPLE, PreflightStatus.ACCEPTED, None),
+        ("b.pdf", Source.SAMPLE, PreflightStatus.ACCEPTED, None),
+        ("big.pdf", Source.SAMPLE, PreflightStatus.REJECTED, "The file is larger than the upload limit."),
+    ]
+
+
 def test_duplicate_upload_points_at_the_original(mock_ctx):
     first = ingest(mock_ctx, "a.pdf", invoice_pdf())
     second = ingest(mock_ctx, "copy of a.pdf", invoice_pdf())
     assert (second.preflight, second.duplicate_of, second.document_id) == (PreflightStatus.DUPLICATE, first.document_id, None)
-    assert len(list(mock_ctx.storage.raw.iterdir())) == 1
+    stored = [p.stat().st_mode & 0o777 for p in mock_ctx.storage.raw.iterdir()]
+    assert (stored, list(mock_ctx.storage.tmp.iterdir())) == ([0o600], [])
+
+
+def test_upload_is_stored_on_filesystems_without_hard_links(mock_ctx, monkeypatch):
+    def no_links(_src, _dst):
+        raise PermissionError("hard links not supported")
+
+    monkeypatch.setattr(os, "link", no_links)
+    item = ingest(mock_ctx, "a.pdf", invoice_pdf())
+    stored = [(p.read_bytes(), p.stat().st_mode & 0o777) for p in mock_ctx.storage.raw.iterdir()]
+    assert (item.preflight, stored, list(mock_ctx.storage.tmp.iterdir())) == (
+        PreflightStatus.ACCEPTED, [(invoice_pdf(), 0o600)], [])
 
 
 def test_concurrent_duplicate_uploads_store_one_document(mock_ctx):

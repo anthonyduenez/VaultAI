@@ -319,7 +319,7 @@ def check_amounts(ctx: Ctx) -> Iterable[Found]:
 
 _BY = re.compile(r"^by:?(?:\s|$)", re.I)
 _SIGNATURE_LABEL = re.compile(r"^(?:authorized\s+|customer\s+|employee\s+|applicant\s+)?signature\b", re.I)
-_CLOSING = re.compile(r"^(sincerely|regards|best regards|kind regards|very truly yours|yours truly|respectfully|cordially),?$", re.I)
+CLOSING = re.compile(r"^(sincerely|regards|best regards|kind regards|very truly yours|yours truly|respectfully|cordially),?$", re.I)
 _ACCEPTANCE = re.compile(r"\b(accepted and agreed|agreed and accepted|acknowledged and agreed|accepted by|agreed to by)\b", re.I)
 _NAME_LABEL = re.compile(r"^name:\s*(?P<name>.*)$", re.I)
 
@@ -363,7 +363,7 @@ def signature_blocks(ctx: Ctx) -> list[SignatureBlock]:
             continue
         rows = [ln for ln in page.lines if ln.flag is None and ln.bbox]
         for idx, line in enumerate(rows):
-            if _CLOSING.match(line.text.strip()) and idx + 1 < len(rows):
+            if CLOSING.match(line.text.strip()) and idx + 1 < len(rows):
                 name_line = rows[idx + 1]
                 x0 = line.bbox[0] - 0.02
                 gap = (name_line.bbox[1] - line.bbox[3]) / max(_height(name_line), 1e-6)

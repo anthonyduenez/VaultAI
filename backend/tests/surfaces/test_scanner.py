@@ -3,13 +3,16 @@ from __future__ import annotations
 import io
 import subprocess
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pypdfium2 as pdfium
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from tests.conftest import make_ctx
 from tests.surfaces.conftest import FakeCore
+from vaultai import db
 from vaultai.capture import scanner as scanner_module
 from vaultai.capture.assemble import apply_edit, capture_filename, images_to_pdf
 from vaultai.capture.scanner import SaneScanner
@@ -161,6 +164,20 @@ def test_sane_scan_of_unlisted_device_never_runs_a_scan(scanimage: FakeScanimage
         SaneScanner(settings).scan("net:10.0.0.9:evil --batch=/etc/x", ScanRequest())
     assert err.value.status == 404
     assert scanimage.calls == [["scanimage", "-L"]]
+
+
+def test_sane_listing_is_reused_for_thirty_seconds(
+    scanimage: FakeScanimage, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = [1000.0]
+    monkeypatch.setattr(scanner_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    sane = SaneScanner(settings)
+    with make_ctx(settings).db() as conn:
+        scanner_module.create_session(conn, sane, "epson2:libusb:001:004", now=db.now())
+    sane.scan("epson2:libusb:001:004", ScanRequest())
+    clock[0] += 31
+    sane.scan("epson2:libusb:001:004", ScanRequest())
+    assert [argv[1] for argv in scanimage.calls] == ["-L", "-d", "-L", "-d"]
 
 
 def test_sane_scan_passes_an_argv_list(scanimage: FakeScanimage, settings: Settings) -> None:

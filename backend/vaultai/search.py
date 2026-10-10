@@ -9,17 +9,15 @@ from datetime import date, timedelta
 from typing import Literal
 
 from vaultai import repo
-from vaultai.domain import DocStatus, DocType, DocumentList, StatusCount, TypeCount
+from vaultai.domain import DocStatus, DocType, DocumentList, DocumentSort, StatusCount, TypeCount
 
-SortKey = Literal["created_at", "doc_date", "total_amount", "confidence", "filename", "next_deadline"]
-
-SORT_COLUMNS: dict[str, str] = {
-    "created_at": "d.created_at",
-    "doc_date": "d.doc_date",
-    "total_amount": "CAST(d.total_amount AS REAL)",
-    "confidence": "d.confidence",
-    "filename": "d.filename COLLATE NOCASE",
-    "next_deadline": "d.next_deadline",
+SORT_COLUMNS: dict[DocumentSort, str] = {
+    DocumentSort.CREATED_AT: "d.created_at",
+    DocumentSort.DOC_DATE: "d.doc_date",
+    DocumentSort.TOTAL_AMOUNT: "CAST(d.total_amount AS REAL)",
+    DocumentSort.CONFIDENCE: "d.confidence",
+    DocumentSort.FILENAME: "d.filename COLLATE NOCASE",
+    DocumentSort.NEXT_DEADLINE: "d.next_deadline",
 }
 
 MAX_QUERY_TOKENS = 12
@@ -35,7 +33,7 @@ class DocumentQuery:
     party: str | None = None
     deadline_within_days: int | None = None
     min_confidence: float | None = None
-    sort: SortKey = "created_at"
+    sort: DocumentSort = DocumentSort.CREATED_AT
     order: Literal["asc", "desc"] = "desc"
     limit: int = 50
     offset: int = 0
@@ -53,7 +51,8 @@ def _like(text: str) -> str:
     return f"%{escaped}%"
 
 
-def _where(query: DocumentQuery) -> tuple[str, list[object]]:
+def where(query: DocumentQuery) -> tuple[str, list[object]]:
+    """The WHERE clause (empty when nothing filters) over `documents d` and its parameters."""
     clauses: list[str] = []
     params: list[object] = []
     if query.q and query.q.strip():
@@ -91,21 +90,21 @@ def _where(query: DocumentQuery) -> tuple[str, list[object]]:
 
 
 def list_documents(conn: sqlite3.Connection, query: DocumentQuery) -> DocumentList:
-    where, params = _where(query)
+    clause, params = where(query)
     column = SORT_COLUMNS[query.sort]
     direction = "ASC" if query.order == "asc" else "DESC"
     rows = conn.execute(
-        f"{repo.SUMMARY_SQL}{where} ORDER BY ({column}) IS NULL, {column} {direction}, d.id {direction} LIMIT ? OFFSET ?",
+        f"{repo.SUMMARY_SQL}{clause} ORDER BY ({column}) IS NULL, {column} {direction}, d.id {direction} LIMIT ? OFFSET ?",
         (*params, query.limit, query.offset),
     ).fetchall()
-    total = conn.execute(f"SELECT COUNT(*) FROM documents d{where}", params).fetchone()[0]
+    total = conn.execute(f"SELECT COUNT(*) FROM documents d{clause}", params).fetchone()[0]
     by_type = conn.execute(
-        f"SELECT d.doc_type, COUNT(*) FROM documents d{where}{' AND' if where else ' WHERE'} d.doc_type IS NOT NULL "
+        f"SELECT d.doc_type, COUNT(*) FROM documents d{clause}{' AND' if clause else ' WHERE'} d.doc_type IS NOT NULL "
         "GROUP BY d.doc_type ORDER BY COUNT(*) DESC, d.doc_type",
         params,
     ).fetchall()
     by_status = conn.execute(
-        f"SELECT d.status, COUNT(*) FROM documents d{where} GROUP BY d.status ORDER BY COUNT(*) DESC, d.status", params
+        f"SELECT d.status, COUNT(*) FROM documents d{clause} GROUP BY d.status ORDER BY COUNT(*) DESC, d.status", params
     ).fetchall()
     return DocumentList(
         items=[repo.summary_from_row(r) for r in rows],

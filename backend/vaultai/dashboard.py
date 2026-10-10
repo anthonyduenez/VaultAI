@@ -91,9 +91,7 @@ def build_dashboard(
 
 
 def load_dashboard(conn: sqlite3.Connection, *, today: date) -> Dashboard:
-    docs = [repo.summary_from_row(r) for r in conn.execute(repo.SUMMARY_SQL)]
-    obligations = [
-        repo.obligation_from_row(r)
-        for r in conn.execute(repo.OBLIGATION_SQL + " WHERE o.status = 'open' AND o.due_date IS NOT NULL")
-    ]
-    return build_dashboard(docs, obligations, repo.load_audit(conn, limit=RECENT_ACTIVITY), today=today)
+    return build_dashboard(
+        repo.load_summaries(conn), repo.open_dated_obligations(conn), repo.load_audit(conn, limit=RECENT_ACTIVITY),
+        today=today,
+    )

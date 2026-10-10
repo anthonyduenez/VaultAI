@@ -57,7 +57,7 @@ a sanitized basename for display.
 | PATCH | `/api/obligations/{id}` | `ObligationUpdate` | `Obligation` |
 
 `DocumentSummary.stage` is a short human label of the current pipeline step while
-`status` is `processing` (e.g. `"Reading pages"`, `"OCR page 2/3"`, `"Classifying"`,
+`status` is `processing` (e.g. `"Reading pages"`, `"OCR 2/3"`, `"Classifying"`,
 `"Extracting fields"`, `"Analyzing clauses"`, `"Validating"`).
 
 ## Review

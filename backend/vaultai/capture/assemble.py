@@ -11,6 +11,7 @@ from PIL import Image, UnidentifiedImageError
 
 from vaultai.context import AppContext
 from vaultai.domain import Box, DocType, IntakeItem, Source
+from vaultai.intake.ingest import ingest_bytes
 from vaultai.repo import Problem
 
 ROTATIONS: dict[int, Image.Transpose | None] = {
@@ -20,6 +21,7 @@ ROTATIONS: dict[int, Image.Transpose | None] = {
     270: Image.Transpose.ROTATE_90,
 }
 MIN_CROP = 0.05
+GRAY_MODES = frozenset({"1", "L", "LA", "I", "I;16"})
 # One resolution covers every page (a Pillow limit); deriving it from the smallest page keeps every page at least
 # letter size, whatever the scan dpi or phone camera.
 PAGE_LONG_SIDE_IN = 11
@@ -55,8 +57,14 @@ def apply_edit(image: Image.Image, rotation: int, crop: Box | None) -> Image.Ima
     return out
 
 
+def _pdf_page(image: Image.Image) -> Image.Image:
+    # convert() copies even to the same mode, which doubles peak memory across a stack of phone photos.
+    mode = "L" if image.mode in GRAY_MODES else "RGB"
+    return image if image.mode == mode else image.convert(mode)
+
+
 def images_to_pdf(images: list[Image.Image]) -> bytes:
-    pages = [img.convert("L") if img.mode in {"1", "L", "LA", "I", "I;16"} else img.convert("RGB") for img in images]
+    pages = [_pdf_page(img) for img in images]
     dpi = max(36, round(min(max(p.size) for p in pages) / PAGE_LONG_SIDE_IN))
     buf = io.BytesIO()
     pages[0].save(buf, "PDF", save_all=True, append_images=pages[1:], resolution=dpi)
@@ -76,8 +84,6 @@ def ingest_pages(
     source: Source,
     doc_type_hint: DocType | None = None,
 ) -> IntakeItem:
-    from vaultai.intake.ingest import ingest_bytes
-
     return ingest_bytes(
         ctx, filename=filename, data=images_to_pdf(images), source=source, batch_id=secrets.token_hex(8),
         doc_type_hint=doc_type_hint,

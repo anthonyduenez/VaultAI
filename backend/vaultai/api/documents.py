@@ -9,18 +9,21 @@ from fastapi.responses import FileResponse
 from vaultai import db, deletion, repo, review
 from vaultai.api import Conn, Ctx
 from vaultai.domain import (
+    REPROCESSABLE,
     DocStatus,
     DocType,
     DocumentDetail,
     DocumentList,
+    DocumentSort,
     DocumentSummary,
     FieldEdit,
+    InvalidTransition,
     Obligation,
     ObligationUpdate,
     ReviewRequest,
 )
-from vaultai.repo import Problem
-from vaultai.search import DocumentQuery, SortKey, list_documents
+from vaultai.pipeline.process import request_processing
+from vaultai.search import DocumentQuery, list_documents
 
 router = APIRouter()
 
@@ -36,7 +39,7 @@ def search_documents(
     party: Annotated[str | None, Query(max_length=200)] = None,
     deadline_within_days: Annotated[int | None, Query(ge=0, le=3650)] = None,
     min_confidence: Annotated[float | None, Query(ge=0, le=1)] = None,
-    sort: SortKey = "created_at",
+    sort: DocumentSort = DocumentSort.CREATED_AT,
     order: Literal["asc", "desc"] = "desc",
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -90,11 +93,10 @@ def review_document(doc_id: str, body: ReviewRequest, ctx: Ctx, conn: Conn) -> D
 
 @router.post("/documents/{doc_id}/reprocess", response_model=DocumentSummary)
 def reprocess(doc_id: str, ctx: Ctx, conn: Conn) -> DocumentSummary:
-    from vaultai.pipeline.process import request_processing
-
-    repo.doc_row(conn, doc_id)
-    if not request_processing(ctx, [doc_id], actor=ctx.settings.reviewer_name, reprocess=True):
-        raise Problem(409, "invalid_transition", "This document cannot be reprocessed in its current status.")
+    current = repo.get_summary(conn, doc_id).status
+    if current not in REPROCESSABLE:
+        raise InvalidTransition(current, DocStatus.PROCESSING)
+    request_processing(ctx, [doc_id], actor=ctx.settings.reviewer_name, reprocess=True)
     return repo.get_summary(conn, doc_id)
 
 

@@ -3,8 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-import sys
-import types
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -14,8 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import NullModel
-from vaultai import db, repo
+from vaultai import db, repo, review
+from vaultai.api import intake
 from vaultai.app import create_app
+from vaultai.capture import assemble
 from vaultai.config import Settings
 from vaultai.context import AppContext
 from vaultai.domain import SCHEMA_VERSION, IntakeItem, Source
@@ -168,12 +168,9 @@ class FakeCore:
 @pytest.fixture
 def fake_core(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeCore]:
     fake = FakeCore()
-    ingest = types.ModuleType("vaultai.intake.ingest")
-    ingest.ingest_bytes = fake.ingest_bytes  # type: ignore[attr-defined]
-    process = types.ModuleType("vaultai.pipeline.process")
-    process.revalidate = fake.revalidate  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "vaultai.intake.ingest", ingest)
-    monkeypatch.setitem(sys.modules, "vaultai.pipeline.process", process)
+    monkeypatch.setattr(intake, "ingest_bytes", fake.ingest_bytes)
+    monkeypatch.setattr(assemble, "ingest_bytes", fake.ingest_bytes)
+    monkeypatch.setattr(review, "revalidate", fake.revalidate)
     yield fake
 
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable, Iterable, Sequence
+from typing import TypeVar
 
 from vaultai.db import evidence_from_row
 from vaultai.schemas import ENUM_OPTIONS
@@ -21,11 +23,14 @@ from vaultai.domain import (
     IntakeItem,
     LineItem,
     Obligation,
+    ObligationStatus,
     PageInfo,
     Provenance,
     Summary,
     ValidationIssue,
 )
+
+T = TypeVar("T")
 
 
 class Problem(Exception):
@@ -59,6 +64,10 @@ def summary_from_row(row: sqlite3.Row) -> DocumentSummary:
     data["deferred"] = row["deferred_at"] is not None
     data["injection_suspected"] = bool(row["injection_suspected"])
     return DocumentSummary.model_validate(data)
+
+
+def load_summaries(conn: sqlite3.Connection, where: str = "", params: Sequence[object] = ()) -> list[DocumentSummary]:
+    return [summary_from_row(r) for r in conn.execute(f"{SUMMARY_SQL} {where}", params)]
 
 
 def doc_row(conn: sqlite3.Connection, doc_id: str) -> sqlite3.Row:
@@ -96,18 +105,45 @@ def field_from_row(row: sqlite3.Row) -> ExtractedField:
     )
 
 
+# One JSON-array parameter instead of one per id, so a selection never hits SQLite's bound-variable limit.
+_IN_IDS = "IN (SELECT value FROM json_each(?))"
+
+
+def _by_doc(rows: Iterable[sqlite3.Row], from_row: Callable[[sqlite3.Row], T]) -> dict[str, list[T]]:
+    grouped: dict[str, list[T]] = {}
+    for row in rows:
+        grouped.setdefault(row["doc_id"], []).append(from_row(row))
+    return grouped
+
+
+def fields_by_doc(conn: sqlite3.Connection, doc_ids: Sequence[str]) -> dict[str, list[ExtractedField]]:
+    rows = conn.execute(f"SELECT * FROM fields WHERE doc_id {_IN_IDS} ORDER BY id", (json.dumps(doc_ids),))
+    return _by_doc(rows, field_from_row)
+
+
 def load_fields(conn: sqlite3.Connection, doc_id: str) -> list[ExtractedField]:
-    rows = conn.execute("SELECT * FROM fields WHERE doc_id = ? ORDER BY id", (doc_id,))
-    return [field_from_row(r) for r in rows]
+    return fields_by_doc(conn, [doc_id]).get(doc_id, [])
+
+
+def human_edit_counts(conn: sqlite3.Connection, doc_ids: Sequence[str]) -> dict[str, int]:
+    rows = conn.execute(
+        f"SELECT doc_id, COUNT(*) FROM fields WHERE doc_id {_IN_IDS} AND edited_at IS NOT NULL GROUP BY doc_id",
+        (json.dumps(doc_ids),),
+    )
+    return dict(rows.fetchall())
+
+
+def issues_by_doc(conn: sqlite3.Connection, doc_ids: Sequence[str]) -> dict[str, list[ValidationIssue]]:
+    rows = conn.execute(
+        f"SELECT * FROM issues WHERE doc_id {_IN_IDS} "
+        "ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, id",
+        (json.dumps(doc_ids),),
+    )
+    return _by_doc(rows, issue_from_row)
 
 
 def load_issues(conn: sqlite3.Connection, doc_id: str) -> list[ValidationIssue]:
-    rows = conn.execute(
-        "SELECT * FROM issues WHERE doc_id = ? "
-        "ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, id",
-        (doc_id,),
-    )
-    return [issue_from_row(r) for r in rows]
+    return issues_by_doc(conn, [doc_id]).get(doc_id, [])
 
 
 def issue_from_row(row: sqlite3.Row) -> ValidationIssue:
@@ -140,10 +176,20 @@ def obligation_from_row(row: sqlite3.Row) -> Obligation:
     )
 
 
-def load_obligations(conn: sqlite3.Connection, doc_id: str) -> list[Obligation]:
+def obligations_by_doc(conn: sqlite3.Connection, doc_ids: Sequence[str]) -> dict[str, list[Obligation]]:
     rows = conn.execute(
-        OBLIGATION_SQL + " WHERE o.doc_id = ? ORDER BY o.due_date IS NULL, o.due_date, o.id", (doc_id,)
+        f"{OBLIGATION_SQL} WHERE o.doc_id {_IN_IDS} ORDER BY o.due_date IS NULL, o.due_date, o.id",
+        (json.dumps(doc_ids),),
     )
+    return _by_doc(rows, obligation_from_row)
+
+
+def load_obligations(conn: sqlite3.Connection, doc_id: str) -> list[Obligation]:
+    return obligations_by_doc(conn, [doc_id]).get(doc_id, [])
+
+
+def open_dated_obligations(conn: sqlite3.Connection) -> list[Obligation]:
+    rows = conn.execute(f"{OBLIGATION_SQL} WHERE o.status = ? AND o.due_date IS NOT NULL", (ObligationStatus.OPEN.value,))
     return [obligation_from_row(r) for r in rows]
 
 

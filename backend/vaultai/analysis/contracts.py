@@ -17,7 +17,7 @@ from vaultai.analysis import Analysis, ClauseRec, ObligationRec
 from vaultai.domain import LEGAL_DOC_TYPES, ClauseKind, ClauseRisk, DocType, IssueCode, ObligationKind
 from vaultai.extraction import PATTERN, Found, evidence
 from vaultai.extraction.normalize import clean_text, find_dates, find_money, money_str, number_word
-from vaultai.extraction.rules import ORG_SUFFIX, Ctx, SignatureBlock, found, signature_blocks
+from vaultai.extraction.rules import CLOSING, ORG_SUFFIX, Ctx, SignatureBlock, found, signature_blocks
 from vaultai.parsing.layout import Doc, Line
 from vaultai.parsing.tables import DELIVERABLE_COLUMNS, read_rows
 from vaultai.schemas import SCHEMAS
@@ -230,7 +230,6 @@ def _clause(kind: ClauseKind | None, heading_line: Line | None, heading: str, bo
 
 _SIGNATURE_START = re.compile(r"\b(in witness whereof|accepted and agreed|agreed and accepted)\b", re.I)
 _SALUTATION = re.compile(r"^dear\b", re.I)
-_CLOSING = re.compile(r"^(sincerely|regards|best regards|kind regards|very truly yours|yours truly|respectfully|cordially),?$", re.I)
 
 
 def clauses(doc: Doc) -> list[ClauseRec]:
@@ -246,7 +245,7 @@ def clauses(doc: Doc) -> list[ClauseRec]:
                 out.append(rec)
     else:
         start = next((i + 1 for i, ln in enumerate(body) if _SALUTATION.match(ln.text)), None)
-        stop = next((i for i, ln in enumerate(body) if _CLOSING.match(ln.text.strip())), sig)
+        stop = next((i for i, ln in enumerate(body) if CLOSING.match(ln.text.strip())), sig)
         if start is not None:
             ids = {ln.id for ln in body[start:min(stop, sig)]}
             for para in paragraphs(doc):
@@ -578,8 +577,8 @@ def obligations(doc: Doc, doc_type: DocType, fields: Mapping[str, Found], date_o
             hits = find_dates(row.cells.get("due", ""), date_order)
             add(ObligationKind.DELIVERABLE, provider, row.cells["description"], hits[0].value if hits else None, row.line)
 
-    fee = next((fields[k] for k in ("total", "compensation", "contract_value") if k in fields and fields[k].value), None)
-    if not payments and fee and fee.evidence:
+    fee = fields.get(SCHEMAS[doc_type].total or "")
+    if not payments and fee and fee.value and fee.evidence:
         terms = value("payment_terms")
         add(ObligationKind.PAYMENT, client, f"Pay {fee.raw_text}" + (f": {terms}" if terms else ""), None,
             doc.by_id[fee.evidence.line_id])

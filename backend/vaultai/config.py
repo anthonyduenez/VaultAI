@@ -72,6 +72,11 @@ class Settings:
     scanner_backend: str = "auto"
     egress_guard: bool = True
 
+    def __post_init__(self) -> None:
+        # Validate however Settings is built, not only via load_settings, so no caller can
+        # configure a public model endpoint or auto-approve legal documents.
+        _check(self)
+
     @property
     def raw_dir(self) -> Path:
         return self.data_dir / "raw"
@@ -178,11 +183,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         except (ValueError, ArithmeticError) as exc:
             raise ConfigError(f"VAULTAI_{name.upper()}: {exc}") from exc
     settings = Settings(**kwargs)
-    _check(settings)
+    _check_choices(settings)
     return settings
 
 
 def _check(s: Settings) -> None:
+    """Privacy and safety invariants. Runs on every Settings, however it was built."""
     if s.model_backend is ModelKind.OPENAI_COMPAT:
         host = urlparse(s.model_endpoint).hostname or ""
         if not is_local_host(host):
@@ -194,11 +200,19 @@ def _check(s: Settings) -> None:
         raise ConfigError(
             f"VAULTAI_AUTO_APPROVE_TYPES cannot include {', '.join(sorted(legal))}; legal documents always need a human"
         )
-    if s.date_order not in {"MDY", "DMY"}:
-        raise ConfigError("VAULTAI_DATE_ORDER must be MDY or DMY")
-    if s.ocr_engine not in {"auto", "tesseract", "none"}:
-        raise ConfigError("VAULTAI_OCR_ENGINE must be auto, tesseract, or none")
-    if s.scanner_backend not in {"auto", "sane", "mock", "none"}:
-        raise ConfigError("VAULTAI_SCANNER_BACKEND must be auto, sane, mock, or none")
     if not is_local_host(s.host):
         raise ConfigError("VAULTAI_HOST must be a loopback or private address; the desktop API is never public")
+
+
+_CHOICES = {
+    "date_order": ("MDY", "DMY"),
+    "ocr_engine": ("auto", "tesseract", "none"),
+    "scanner_backend": ("auto", "sane", "mock", "none"),
+}
+
+
+def _check_choices(s: Settings) -> None:
+    """Operator input from the environment; tests may construct other engines directly."""
+    for name, allowed in _CHOICES.items():
+        if getattr(s, name) not in allowed:
+            raise ConfigError(f"VAULTAI_{name.upper()} must be one of {', '.join(allowed)}")

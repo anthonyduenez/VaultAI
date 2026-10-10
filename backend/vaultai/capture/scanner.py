@@ -11,6 +11,7 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +39,8 @@ from vaultai.storage import Storage
 
 SCAN_TIMEOUT_S = 120
 LIST_TIMEOUT_S = 30
+# A scan validates its device against this listing; reprobing would add a USB/network round trip to every page.
+LISTING_TTL_S = 30
 MAX_SESSION_PAGES = 100
 SCAN_FAILED = Problem(502, "scan_failed", "The scanner did not return a page. Check the paper and try again.")
 SANE_DEVICE = re.compile(r"^device `(?P<id>[^']+)' is a (?P<name>.+)$", re.MULTILINE)
@@ -47,6 +50,8 @@ class ScannerBackend(Protocol):
     name: Literal["sane", "mock"]
 
     def devices(self) -> list[ScannerDevice]: ...
+
+    def has_device(self, device_id: str) -> bool: ...
 
     def scan(self, device_id: str, request: ScanRequest) -> list[Image.Image]: ...
 
@@ -66,14 +71,22 @@ class SaneScanner:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._listing: tuple[float, dict[str, str]] | None = None
 
     @staticmethod
     def available() -> bool:
         return shutil.which("scanimage") is not None
 
-    def _listed(self) -> dict[str, str]:
+    def _probe(self) -> dict[str, str]:
         out = _run(["scanimage", "-L"], LIST_TIMEOUT_S).decode("utf-8", errors="replace")
-        return {m["id"]: m["name"].strip() for m in SANE_DEVICE.finditer(out)}
+        listed = {m["id"]: m["name"].strip() for m in SANE_DEVICE.finditer(out)}
+        self._listing = (time.monotonic(), listed)
+        return listed
+
+    def _listed(self) -> dict[str, str]:
+        if self._listing is not None and time.monotonic() - self._listing[0] < LISTING_TTL_S:
+            return self._listing[1]
+        return self._probe()
 
     def _duplex(self, device_id: str) -> bool:
         try:
@@ -83,11 +96,14 @@ class SaneScanner:
 
     def devices(self) -> list[ScannerDevice]:
         return [
-            ScannerDevice(id=i, name=n, backend="sane", duplex=self._duplex(i)) for i, n in self._listed().items()
+            ScannerDevice(id=i, name=n, backend="sane", duplex=self._duplex(i)) for i, n in self._probe().items()
         ]
 
+    def has_device(self, device_id: str) -> bool:
+        return device_id in self._listed()
+
     def scan(self, device_id: str, request: ScanRequest) -> list[Image.Image]:
-        if device_id not in self._listed():
+        if not self.has_device(device_id):
             raise repo.not_found()
         argv = [
             "scanimage", "-d", device_id, "--format=png", "--resolution", str(request.dpi),
@@ -158,8 +174,11 @@ class MockScanner:
     def devices(self) -> list[ScannerDevice]:
         return [MOCK_DEVICE]
 
+    def has_device(self, device_id: str) -> bool:
+        return device_id == MOCK_DEVICE.id
+
     def scan(self, device_id: str, request: ScanRequest) -> list[Image.Image]:
-        if device_id != MOCK_DEVICE.id:
+        if not self.has_device(device_id):
             raise repo.not_found()
         pages = self._pages()
         if not pages:
@@ -218,7 +237,7 @@ def _page_row(conn: sqlite3.Connection, session_id: str, page_id: int) -> sqlite
 
 
 def create_session(conn: sqlite3.Connection, scanner: ScannerBackend | None, device_id: str, *, now: datetime) -> str:
-    if scanner is None or device_id not in {d.id for d in scanner.devices()}:
+    if scanner is None or not scanner.has_device(device_id):
         raise repo.not_found()
     session_id = secrets.token_urlsafe(16)
     conn.execute(

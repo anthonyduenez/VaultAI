@@ -4,11 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from vaultai import db
+from vaultai.app import build_context
 from vaultai.config import REPO_ROOT, Settings
 from vaultai.context import AppContext
 from vaultai.domain import ModelKind, ModelStatus
-from vaultai.storage import Storage
 
 SAMPLES = REPO_ROOT / "samples"
 
@@ -33,12 +32,7 @@ def settings(tmp_path: Path) -> Settings:
 
 
 def make_ctx(settings: Settings, model: object | None = None) -> AppContext:
-    storage = Storage(settings)
-    storage.ensure_dirs()
-    conn = db.connect(settings.db_path)
-    db.init_db(conn)
-    conn.close()
-    return AppContext(settings=settings, storage=storage, model=model or NullModel())
+    return build_context(settings, model or NullModel())
 
 
 @pytest.fixture

@@ -36,16 +36,6 @@ OBLIGATION_CATEGORY: dict[ObligationKind, ActionCategory] = {
     ObligationKind.DELIVERABLE: A.OBLIGATION,
 }
 
-OBLIGATION_LABEL: dict[ObligationKind, str] = {
-    ObligationKind.RENEWAL: "Renewal",
-    ObligationKind.NOTICE: "Notice",
-    ObligationKind.EXPIRATION: "Expiration",
-    ObligationKind.PAYMENT: "Payment",
-    ObligationKind.SIGNATURE: "Signature",
-    ObligationKind.OBLIGATION: "Obligation",
-    ObligationKind.DELIVERABLE: "Deliverable",
-}
-
 ISSUE_CATEGORY: dict[IssueCode, ActionCategory] = {
     IssueCode.MISSING_REQUIRED: A.MISSING_INFO,
     IssueCode.AMOUNT_MISMATCH: A.AMOUNT_MISMATCH,
@@ -139,6 +129,7 @@ def build_action_center(
     today: date,
     now: datetime,
 ) -> ActionCenter:
+    """`issues` are those on unsettled documents only."""
     by_id = {d.id: d for d in docs}
     items: list[ActionItem] = []
 
@@ -153,8 +144,7 @@ def build_action_center(
 
     grouped: dict[tuple[str, ActionCategory], list[ValidationIssue]] = defaultdict(list)
     for doc_id, issue in issues:
-        doc = by_id.get(doc_id)
-        if doc is not None and doc.status not in SETTLED and issue.code in ISSUE_CATEGORY:
+        if doc_id in by_id and issue.code in ISSUE_CATEGORY:
             grouped[(doc_id, ISSUE_CATEGORY[issue.code])].append(issue)
     for (doc_id, category), found in grouped.items():
         severity = min((i.severity for i in found), key=_SEVERITY_RANK.__getitem__)
@@ -173,7 +163,7 @@ def build_action_center(
                 id=f"obligation:{ob.id}",
                 category=OBLIGATION_CATEGORY[ob.kind],
                 severity=_obligation_severity(ob.due_date, today),
-                title=f"{OBLIGATION_LABEL[ob.kind]} {due_phrase(ob.due_date, today)}",
+                title=f"{ob.kind.value.capitalize()} {due_phrase(ob.due_date, today)}",
                 detail=ob.description,
                 doc_id=ob.doc_id,
                 doc_filename=ob.doc_filename,
@@ -199,10 +189,11 @@ def build_action_center(
 
 
 def load_action_center(conn: sqlite3.Connection, *, today: date, now: datetime) -> ActionCenter:
-    docs = [repo.summary_from_row(r) for r in conn.execute(repo.SUMMARY_SQL)]
-    obligations = [
-        repo.obligation_from_row(r)
-        for r in conn.execute(repo.OBLIGATION_SQL + " WHERE o.status = 'open' AND o.due_date IS NOT NULL")
-    ]
-    issues = [(r["doc_id"], repo.issue_from_row(r)) for r in conn.execute("SELECT * FROM issues")]
-    return build_action_center(docs, obligations, issues, today=today, now=now)
+    settled = sorted(s.value for s in SETTLED)
+    rows = conn.execute(
+        "SELECT i.* FROM issues i JOIN documents d ON d.id = i.doc_id "
+        f"WHERE d.status NOT IN ({','.join('?' * len(settled))})",
+        settled,
+    )
+    issues = [(r["doc_id"], repo.issue_from_row(r)) for r in rows]
+    return build_action_center(repo.load_summaries(conn), repo.open_dated_obligations(conn), issues, today=today, now=now)

@@ -2,20 +2,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
 from vaultai import db, repo
 from vaultai.api import Conn, Ctx
 from vaultai.capture import scanner
 from vaultai.capture.scanner import ScannerBackend
-from vaultai.domain import ApiModel, AssembleRequest, CaptureSession, IntakeItem, ScannerDevice, ScanRequest
+from vaultai.domain import AssembleRequest, CaptureSession, IntakeItem, NewScanSession, ScannerDevice, ScanRequest
 
 router = APIRouter()
-
-
-class NewScanSession(ApiModel):
-    device_id: str = Field(min_length=1, max_length=300)
 
 
 def _scanner(request: Request) -> ScannerBackend | None:

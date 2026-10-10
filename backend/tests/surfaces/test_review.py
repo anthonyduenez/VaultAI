@@ -7,9 +7,9 @@ from fastapi.testclient import TestClient
 
 from tests.surfaces.conftest import FakeCore, audit_rows, field_row, insert_document
 from vaultai.context import AppContext
-from vaultai.domain import DocStatus, ReviewAction
-from vaultai.review import normalize_value, plan_review
+from vaultai.domain import ValueType
 from vaultai.repo import Problem
+from vaultai.review import normalize_value
 
 NOW = datetime(2026, 10, 10, 9, 30, tzinfo=UTC)
 
@@ -32,14 +32,24 @@ def test_approve_records_human_approval_and_history(client: TestClient, app_ctx:
 @pytest.mark.parametrize(
     ("status", "action"),
     [("approved", "approve"), ("approved", "reject"), ("rejected", "approve"), ("approved", "defer"),
-     ("imported", "reopen"), ("processing", "approve")],
+     ("imported", "reopen"), ("ready", "reopen"), ("processing", "approve")],
 )
 def test_illegal_transitions_are_409(client: TestClient, app_ctx: AppContext, status: str, action: str) -> None:
     doc_id = insert_document(app_ctx, status=status)
     response = review(client, doc_id, action)
     assert response.status_code == 409
-    assert response.json()["code"] == "invalid_transition"
+    assert response.json() == {
+        "code": "invalid_transition", "message": f"Not allowed while the document is {status.replace('_', ' ')}.",
+    }
     assert client.get(f"/api/documents/{doc_id}").json()["status"] == status
+
+
+def test_reprocess_is_409_while_processing(client: TestClient, app_ctx: AppContext) -> None:
+    doc_id = insert_document(app_ctx, status="processing")
+    response = client.post(f"/api/documents/{doc_id}/reprocess")
+    assert (response.status_code, response.json()) == (
+        409, {"code": "invalid_transition", "message": "Not allowed while the document is processing."},
+    )
 
 
 def test_defer_from_ready_moves_to_needs_review_and_marks_deferred(client: TestClient, app_ctx: AppContext) -> None:
@@ -67,9 +77,15 @@ def test_approving_with_unresolved_errors_requires_a_note(client: TestClient, ap
     assert review(client, doc_id, "approve", "Vendor confirmed by phone").json()["status"] == "approved"
 
 
-def test_plan_review_reject_from_ready() -> None:
-    changes = plan_review(DocStatus.READY, ReviewAction.REJECT, error_count=0, note=None, actor="a", now=NOW)
-    assert changes == {"status": "rejected", "deferred_at": None}
+def test_reject_clears_deferral_and_reopen_returns_it_to_review(client: TestClient, app_ctx: AppContext) -> None:
+    doc_id = insert_document(app_ctx, status="ready")
+    review(client, doc_id, "defer")
+    body = review(client, doc_id, "reject", "Not ours").json()
+    assert (body["status"], body["deferred"]) == ("rejected", False)
+    body = review(client, doc_id, "reopen").json()
+    assert [(h["action"], h["before"], h["after"]) for h in reversed(body["history"])] == [
+        ("defer", "ready", "needs_review"), ("reject", "needs_review", "rejected"), ("reopen", "rejected", "needs_review"),
+    ]
 
 
 def test_human_edit_keeps_ai_value_and_audits_before_after(
@@ -126,10 +142,10 @@ def test_unknown_field_is_404(client: TestClient, app_ctx: AppContext, fake_core
     assert client.patch(f"/api/documents/{doc_id}/fields/nope", json={"value": "1"}).status_code == 404
 
 
-def test_normalize_value_dates_and_clearing() -> None:
-    from vaultai.domain import ValueType
-
+def test_normalize_value_dates_money_and_clearing() -> None:
     assert normalize_value(ValueType.DATE, " 2026-03-04 ") == "2026-03-04"
+    assert normalize_value(ValueType.MONEY, "US$ 1,200") == "1200.00"
+    assert normalize_value(ValueType.MONEY, "-£7.5") == "-7.50"
     assert normalize_value(ValueType.IDENTIFIER, "  000123456789 ") == "000123456789"
     assert normalize_value(ValueType.MONEY, "") is None
     with pytest.raises(Problem):
@@ -143,7 +159,7 @@ def test_batch_review_reports_each_document(client: TestClient, app_ctx: AppCont
     response = client.post("/api/review/batch", json={"doc_ids": [ok, done, errors, "missing"], "action": "approve"})
     assert response.json()["results"] == [
         {"doc_id": ok, "ok": True, "status": "approved", "error": None},
-        {"doc_id": done, "ok": False, "status": None, "error": "Not allowed while approved."},
+        {"doc_id": done, "ok": False, "status": None, "error": "Not allowed while the document is approved."},
         {"doc_id": errors, "ok": False, "status": None,
          "error": "Add a note explaining why you are approving a document with unresolved errors."},
         {"doc_id": "missing", "ok": False, "status": None, "error": "Not found."},

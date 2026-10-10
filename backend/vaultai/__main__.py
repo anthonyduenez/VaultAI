@@ -16,8 +16,8 @@ import uvicorn
 from vaultai import deletion
 from vaultai.app import build_context, create_app
 from vaultai.config import load_settings
-from vaultai.domain import PreflightStatus, Source
-from vaultai.intake.ingest import ingest_bytes
+from vaultai.domain import PreflightStatus
+from vaultai.intake.ingest import ingest_samples
 from vaultai.logging_utils import configure_logging
 from vaultai.pipeline.process import process_document, request_processing
 from vaultai.security.egress import install_egress_guard
@@ -42,11 +42,7 @@ def load_samples() -> None:
     if settings.egress_guard:
         install_egress_guard()
     ctx = build_context(settings)
-    demo = settings.samples_dir / "demo"
-    items = [
-        ingest_bytes(ctx, filename=path.name, data=path.read_bytes(), source=Source.SAMPLE, batch_id="cli-samples")
-        for path in sorted(demo.glob("*.pdf"))
-    ]
+    items = ingest_samples(ctx, batch_id="cli-samples")
     accepted = [i.document_id for i in items if i.preflight is PreflightStatus.ACCEPTED and i.document_id]
     for doc_id in request_processing(ctx, accepted, actor=settings.reviewer_name):
         process_document(ctx, doc_id)

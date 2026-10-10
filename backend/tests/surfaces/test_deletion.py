@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+
 from fastapi.testclient import TestClient
 
-from tests.surfaces.conftest import FakeCore, audit_rows, field_row, insert_document
+from tests.surfaces.conftest import FakeCore, field_row, insert_document
 from vaultai import db
 from vaultai.context import AppContext
 from vaultai.domain import Source
@@ -13,9 +15,11 @@ def stored_name(ctx: AppContext, doc_id: str) -> str:
         return conn.execute("SELECT stored_name FROM documents WHERE id = ?", (doc_id,)).fetchone()[0]
 
 
-def test_delete_document_removes_files_and_rows_but_keeps_audit(client: TestClient, app_ctx: AppContext) -> None:
+def test_delete_document_removes_files_and_rows_and_redacts_its_audit(
+    client: TestClient, app_ctx: AppContext, fake_core: FakeCore
+) -> None:
     doc_id = insert_document(app_ctx, filename="acme.pdf", text="unique-word", status="needs_review",
-                             fields=[field_row("vendor", "Acme")],
+                             fields=[field_row("vendor", "Acme")], raw=b"%PDF-1.7 acme",
                              obligations=[{"kind": "payment", "description": "Pay", "due_date": "2026-11-01"}])
     keep = insert_document(app_ctx, filename="other.pdf")
     raw = app_ctx.storage.raw_path(stored_name(app_ctx, doc_id))
@@ -24,7 +28,8 @@ def test_delete_document_removes_files_and_rows_but_keeps_audit(client: TestClie
             "INSERT INTO intake (batch_id, filename, source, size_bytes, preflight, document_id, created_at) "
             "VALUES ('b', 'acme.pdf', 'upload', 1, 'accepted', ?, ?)", (doc_id, db.iso()),
         )
-    client.post(f"/api/documents/{doc_id}/review", json={"action": "reject"})
+    client.patch(f"/api/documents/{doc_id}/fields/vendor", json={"value": "Acme Supply", "note": "per invoice"})
+    client.post(f"/api/documents/{doc_id}/review", json={"action": "reject", "note": "Acme duplicate"})
 
     assert client.delete(f"/api/documents/{doc_id}").status_code == 204
 
@@ -34,11 +39,19 @@ def test_delete_document_removes_files_and_rows_but_keeps_audit(client: TestClie
     with app_ctx.db() as conn:
         leftovers = [conn.execute(f"SELECT COUNT(*) FROM {t} WHERE doc_id = ?", (doc_id,)).fetchone()[0]
                      for t in ("fields", "obligations", "pages", "doc_fts")]
-        intake_doc = conn.execute("SELECT document_id FROM intake").fetchone()[0]
+        intake_rows = conn.execute("SELECT COUNT(*) FROM intake").fetchone()[0]
     assert leftovers == [0, 0, 0, 0]
-    assert intake_doc is None
-    assert [a[0] for a in audit_rows(app_ctx, doc_id)] == ["reject", "delete"]
-    assert client.get("/api/audit", params={"doc_id": doc_id}).json()[0]["note"].startswith("acme.pdf (sha256 ")
+    assert intake_rows == 0
+    with app_ctx.db() as conn:
+        audit = [tuple(r) for r in conn.execute(
+            "SELECT action, actor, field_key, before, after, note FROM audit_log WHERE doc_id = ? ORDER BY id", (doc_id,)
+        )]
+    sha12 = hashlib.sha256(b"%PDF-1.7 acme").hexdigest()[:12]
+    assert audit == [
+        ("edit_field", "local-user", "vendor", None, None, None),
+        ("reject", "local-user", None, None, None, None),
+        ("delete", "local-user", None, None, None, f"sha256 {sha12}"),
+    ]
     assert client.get(f"/api/documents/{keep}").status_code == 200
 
 

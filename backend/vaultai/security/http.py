@@ -156,7 +156,7 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(InvalidTransition)
     async def on_transition(request: Request, exc: InvalidTransition) -> JSONResponse:
-        return api_error(409, "invalid_transition", "This action is not allowed for the document's current status.")
+        return api_error(409, "invalid_transition", str(exc))
 
     @app.exception_handler(RequestValidationError)
     async def on_validation(request: Request, exc: RequestValidationError) -> JSONResponse:

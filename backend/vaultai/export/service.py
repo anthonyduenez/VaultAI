@@ -10,7 +10,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 
-from vaultai import db, repo
+from vaultai import db, repo, search
 from vaultai.context import AppContext
 from vaultai.domain import (
     APP_VERSION,
@@ -31,10 +31,8 @@ from vaultai.domain import (
     FieldOrigin,
     Obligation,
     Provenance,
-    Severity,
     TypeCount,
     ValidationIssue,
-    check_transition,
 )
 from vaultai.export import Column, Kind, Table
 from vaultai.export.csv_export import render_csv
@@ -103,13 +101,7 @@ OBLIGATION_COLUMNS = (
 class Record:
     doc: DocumentSummary
     provenance: Provenance
-    fields: list[ExtractedField]
-    issues: list[ValidationIssue]
-    obligations: list[Obligation]
-
-    @property
-    def human_edits(self) -> int:
-        return sum(f.origin is FieldOrigin.HUMAN for f in self.fields)
+    human_edits: int
 
 
 @dataclass(frozen=True)
@@ -119,39 +111,44 @@ class Selection:
     needs_review_count: int
 
 
-def _matching_rows(conn: sqlite3.Connection, filters: ExportFilters, statuses: frozenset[DocStatus]) -> list[sqlite3.Row]:
-    clauses = [f"d.status IN ({','.join('?' * len(statuses))})"]
-    params: list[object] = sorted(s.value for s in statuses)
-    if filters.doc_types:
-        clauses.append(f"d.doc_type IN ({','.join('?' * len(filters.doc_types))})")
-        params.extend(t.value for t in filters.doc_types)
-    if filters.date_from:
-        clauses.append("d.doc_date >= ?")
-        params.append(filters.date_from.isoformat())
-    if filters.date_to:
-        clauses.append("d.doc_date <= ?")
-        params.append(filters.date_to.isoformat())
-    sql = f"{repo.SUMMARY_SQL} WHERE {' AND '.join(clauses)} ORDER BY d.doc_date IS NULL, d.doc_date, d.filename, d.id"
-    return conn.execute(sql, params).fetchall()
+@dataclass(frozen=True)
+class Details:
+    """Rows behind the evidence, warnings, and obligations sheets, by document id."""
+
+    fields: dict[str, list[ExtractedField]]
+    issues: dict[str, list[ValidationIssue]]
+    obligations: dict[str, list[Obligation]]
 
 
-def _record(conn: sqlite3.Connection, row: sqlite3.Row) -> Record:
-    return Record(
-        doc=repo.summary_from_row(row),
-        provenance=repo.provenance_from_row(row),
-        fields=repo.load_fields(conn, row["id"]),
-        issues=repo.load_issues(conn, row["id"]),
-        obligations=repo.load_obligations(conn, row["id"]),
-    )
+def _where(filters: ExportFilters, statuses: frozenset[DocStatus]) -> tuple[str, list[object]]:
+    """The explorer's filter, so a preview and the document list never disagree on what matches."""
+    return search.where(search.DocumentQuery(
+        statuses=tuple(statuses), doc_types=tuple(filters.doc_types), date_from=filters.date_from,
+        date_to=filters.date_to,
+    ))
+
+
+def _records(conn: sqlite3.Connection, filters: ExportFilters, statuses: frozenset[DocStatus]) -> list[Record]:
+    where, params = _where(filters, statuses)
+    rows = conn.execute(
+        f"{repo.SUMMARY_SQL}{where} ORDER BY d.doc_date IS NULL, d.doc_date, d.filename, d.id", params
+    ).fetchall()
+    edits = repo.human_edit_counts(conn, [r["id"] for r in rows])
+    return [Record(repo.summary_from_row(r), repo.provenance_from_row(r), edits.get(r["id"], 0)) for r in rows]
 
 
 def select_records(conn: sqlite3.Connection, filters: ExportFilters) -> Selection:
-    pending = _matching_rows(conn, filters, REVIEWABLE)
+    where, params = _where(filters, REVIEWABLE)
     return Selection(
-        approved=[_record(conn, r) for r in _matching_rows(conn, filters, EXPORTABLE)],
-        needs_review=[_record(conn, r) for r in pending] if filters.include_needs_review else [],
-        needs_review_count=len(pending),
+        approved=_records(conn, filters, EXPORTABLE),
+        needs_review=_records(conn, filters, REVIEWABLE) if filters.include_needs_review else [],
+        needs_review_count=conn.execute(f"SELECT COUNT(*) FROM documents d{where}", params).fetchone()[0],
     )
+
+
+def load_details(conn: sqlite3.Connection, records: list[Record]) -> Details:
+    ids = [r.doc.id for r in records]
+    return Details(repo.fields_by_doc(conn, ids), repo.issues_by_doc(conn, ids), repo.obligations_by_doc(conn, ids))
 
 
 def sheet_names(filters: ExportFilters) -> list[str]:
@@ -185,7 +182,7 @@ def _bbox(f: ExtractedField) -> str | None:
     return ", ".join(f"{v:.4f}" for v in f.evidence.bbox)
 
 
-def _evidence_rows(records: list[Record]) -> list[tuple[object, ...]]:
+def _evidence_rows(records: list[Record], fields: dict[str, list[ExtractedField]]) -> list[tuple[object, ...]]:
     return [
         (
             r.doc.id, r.doc.filename, f.label, f.value, f.raw_text, ORIGIN_LABEL[f.origin], f.ai_value, f.confidence,
@@ -193,7 +190,7 @@ def _evidence_rows(records: list[Record]) -> list[tuple[object, ...]]:
             f.evidence.text if f.evidence else None, f.edited_by, f.edited_at,
         )
         for r in records
-        for f in r.fields
+        for f in fields.get(r.doc.id, [])
     ]
 
 
@@ -210,25 +207,25 @@ def _metadata_rows(records: list[Record]) -> list[tuple[object, ...]]:
     ]
 
 
-def _warning_rows(records: list[Record]) -> list[tuple[object, ...]]:
+def _warning_rows(records: list[Record], issues: dict[str, list[ValidationIssue]]) -> list[tuple[object, ...]]:
     return [
         (
             r.doc.id, r.doc.filename, i.severity.value, i.code.value, i.field_key, i.message,
             i.evidence.page if i.evidence else None, i.evidence.text if i.evidence else None,
         )
         for r in records
-        for i in r.issues
+        for i in issues.get(r.doc.id, [])
     ]
 
 
-def _obligation_rows(records: list[Record]) -> list[tuple[object, ...]]:
+def _obligation_rows(records: list[Record], obligations: dict[str, list[Obligation]]) -> list[tuple[object, ...]]:
     return [
         (
             r.doc.id, r.doc.filename, o.kind.value, o.party, o.description, o.due_date, o.status.value,
             ORIGIN_LABEL[o.origin], o.evidence.page if o.evidence else None, o.evidence.text if o.evidence else None,
         )
         for r in records
-        for o in r.obligations
+        for o in obligations.get(r.doc.id, [])
     ]
 
 
@@ -246,7 +243,7 @@ def _describe_filters(filters: ExportFilters) -> list[tuple[str, str]]:
 
 
 def build_tables(
-    selection: Selection, filters: ExportFilters, *, export_id: str, actor: str, created_at: datetime
+    selection: Selection, details: Details, filters: ExportFilters, *, export_id: str, actor: str, created_at: datetime
 ) -> list[Table]:
     approved = selection.approved
     info: list[tuple[object, ...]] = [
@@ -268,10 +265,12 @@ def build_tables(
         SHEET_NEEDS_REVIEW: lambda: Table(
             SHEET_NEEDS_REVIEW, RECORD_COLUMNS, [_record_row(r) for r in selection.needs_review]
         ),
-        SHEET_EVIDENCE: lambda: Table(SHEET_EVIDENCE, EVIDENCE_COLUMNS, _evidence_rows(approved)),
+        SHEET_EVIDENCE: lambda: Table(SHEET_EVIDENCE, EVIDENCE_COLUMNS, _evidence_rows(approved, details.fields)),
         SHEET_METADATA: lambda: Table(SHEET_METADATA, METADATA_COLUMNS, _metadata_rows(approved)),
-        SHEET_WARNINGS: lambda: Table(SHEET_WARNINGS, WARNING_COLUMNS, _warning_rows(approved)),
-        SHEET_OBLIGATIONS: lambda: Table(SHEET_OBLIGATIONS, OBLIGATION_COLUMNS, _obligation_rows(approved)),
+        SHEET_WARNINGS: lambda: Table(SHEET_WARNINGS, WARNING_COLUMNS, _warning_rows(approved, details.issues)),
+        SHEET_OBLIGATIONS: lambda: Table(
+            SHEET_OBLIGATIONS, OBLIGATION_COLUMNS, _obligation_rows(approved, details.obligations)
+        ),
     }
     return [tables[name]() for name in sheet_names(filters)]
 
@@ -302,7 +301,7 @@ def _warnings(selection: Selection, filters: ExportFilters) -> list[str]:
                         " to a separate Needs Review sheet and not into Approved Records.")
     if filters.include_needs_review and filters.format is ExportFormat.CSV:
         warnings.append("CSV contains approved records only. Choose XLSX to include the Needs Review sheet.")
-    accepted = sum(any(i.severity is Severity.ERROR for i in r.issues) for r in selection.approved)
+    accepted = sum(r.doc.error_count > 0 for r in selection.approved)
     if accepted:
         warnings.append(f"{_plural(accepted, 'approved record has', 'approved records have')} validation errors a "
                         "reviewer accepted with a note.")
@@ -330,7 +329,8 @@ def create_export(ctx: AppContext, filters: ExportFilters, *, actor: str, now: d
     created_at = db.iso(now)
     with ctx.db() as conn, db.transaction(conn):
         selection = select_records(conn, filters)
-        tables = build_tables(selection, filters, export_id=export_id, actor=actor, created_at=now)
+        details = load_details(conn, selection.approved)
+        tables = build_tables(selection, details, filters, export_id=export_id, actor=actor, created_at=now)
         data = render_xlsx(tables) if filters.format is ExportFormat.XLSX else render_csv(tables[0])
         stored_name = Storage.new_name(filters.format.value)
         ctx.storage.write_new(ctx.storage.exports, stored_name, data)
@@ -343,13 +343,8 @@ def create_export(ctx: AppContext, filters: ExportFilters, *, actor: str, now: d
              stored_name, sha256, duration_ms),
         )
         for record in selection.approved:
-            check_transition(record.doc.status, DocStatus.EXPORTED)
-            conn.execute(
-                "UPDATE documents SET status = ?, updated_at = ? WHERE id = ?",
-                (DocStatus.EXPORTED.value, created_at, record.doc.id),
-            )
-            db.audit(conn, AuditAction.EXPORT, actor, doc_id=record.doc.id, before=record.doc.status.value,
-                     after=DocStatus.EXPORTED.value, note=f"Export {export_id}")
+            db.set_status(conn, record.doc.id, DocStatus.EXPORTED, actor=actor, action=AuditAction.EXPORT,
+                          note=f"Export {export_id}", at=now)
         db.audit(conn, AuditAction.EXPORT, actor, after=repo.export_display_name(created_at, filters.format.value),
                  note=f"Export {export_id}: {_plural(len(selection.approved), 'approved record', 'approved records')}")
         row = conn.execute("SELECT * FROM exports WHERE id = ?", (export_id,)).fetchone()

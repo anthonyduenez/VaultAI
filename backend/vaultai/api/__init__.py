@@ -6,9 +6,10 @@ import sqlite3
 from collections.abc import Iterator
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, Request
 
 from vaultai.context import AppContext
+from vaultai.pipeline.queue import JobQueue
 
 
 def get_ctx(request: Request) -> AppContext:
@@ -24,19 +25,13 @@ Ctx = Annotated[AppContext, Depends(get_ctx)]
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 
 
-async def start_queue(app: FastAPI) -> None:
-    from vaultai.pipeline.queue import JobQueue
-
-    ctx: AppContext = app.state.ctx
+async def start_queue(ctx: AppContext) -> None:
     queue = JobQueue(ctx)
     await queue.start()
     ctx.queue = queue
-    app.state.job_queue = queue
 
 
-async def stop_queue(app: FastAPI) -> None:
-    queue = getattr(app.state, "job_queue", None)
-    if queue is not None:
-        await queue.stop()
-        app.state.job_queue = None
-        app.state.ctx.queue = None
+async def stop_queue(ctx: AppContext) -> None:
+    if ctx.queue is not None:
+        await ctx.queue.stop()
+        ctx.queue = None

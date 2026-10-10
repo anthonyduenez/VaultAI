@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import os
 import secrets
-from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Request, Response
 from starlette.concurrency import run_in_threadpool
@@ -11,6 +9,8 @@ from starlette.datastructures import UploadFile
 from vaultai import deletion, repo
 from vaultai.api import Conn, Ctx
 from vaultai.domain import DocStatus, IntakeItem, ProcessRequest, ProcessResult, Source
+from vaultai.intake.ingest import ingest_bytes, ingest_samples
+from vaultai.pipeline.process import request_processing
 from vaultai.repo import Problem
 from vaultai.security.http import read_capped, read_form
 
@@ -23,21 +23,8 @@ def new_batch_id() -> str:
     return secrets.token_hex(8)
 
 
-def display_name(raw: str | None) -> str:
-    """Folder uploads send relative paths; only the basename is kept."""
-    return PurePosixPath((raw or "").replace("\\", "/")).name or "upload"
-
-
-def _read_sample(path: Path, limit: int) -> bytes:
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    with os.fdopen(fd, "rb") as fh:
-        return fh.read(limit + 1)
-
-
 @router.post("/intake/upload", response_model=list[IntakeItem])
 async def upload(request: Request, ctx: Ctx) -> list[IntakeItem]:
-    from vaultai.intake.ingest import ingest_bytes
-
     limit = ctx.settings.max_batch_files
     form = await read_form(
         request, max_files=limit, too_many=Problem(422, "too_many_files", f"Upload at most {limit} files at a time.")
@@ -56,7 +43,7 @@ async def upload(request: Request, ctx: Ctx) -> list[IntakeItem]:
             data = await read_capped(upload_file, ctx.settings.max_file_bytes)
             items.append(
                 await run_in_threadpool(
-                    ingest_bytes, ctx, filename=display_name(upload_file.filename), data=data, source=source,
+                    ingest_bytes, ctx, filename=upload_file.filename or "", data=data, source=source,
                     batch_id=batch_id,
                 )
             )
@@ -67,20 +54,7 @@ async def upload(request: Request, ctx: Ctx) -> list[IntakeItem]:
 
 @router.post("/intake/samples", response_model=list[IntakeItem])
 def load_samples(ctx: Ctx) -> list[IntakeItem]:
-    from vaultai.intake.ingest import ingest_bytes
-
-    demo = ctx.settings.samples_dir / "demo"
-    if demo.is_symlink() or not demo.is_dir():
-        return []
-    batch_id = new_batch_id()
-    return [
-        ingest_bytes(
-            ctx, filename=path.name, data=_read_sample(path, ctx.settings.max_file_bytes),
-            source=Source.SAMPLE, batch_id=batch_id,
-        )
-        for path in sorted(demo.iterdir())
-        if not path.name.startswith(".") and not path.is_symlink() and path.is_file()
-    ]
+    return ingest_samples(ctx, batch_id=new_batch_id())
 
 
 @router.get("/intake", response_model=list[IntakeItem])
@@ -99,8 +73,6 @@ def remove_intake(intake_id: int, ctx: Ctx, conn: Conn) -> Response:
 
 @router.post("/intake/process", response_model=ProcessResult)
 def process(body: ProcessRequest, ctx: Ctx, conn: Conn) -> ProcessResult:
-    from vaultai.pipeline.process import request_processing
-
     if body.intake_ids is None:
         rows = conn.execute("SELECT id FROM documents WHERE status = ? ORDER BY created_at, id", (DocStatus.IMPORTED.value,))
     else:

@@ -15,18 +15,20 @@ import shutil
 import sqlite3
 import time
 from collections.abc import Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from vaultai import db
+from vaultai import db, repo
 from vaultai.analysis import ClauseRec, ObligationRec
 from vaultai.analysis.contracts import analyze
 from vaultai.classify import MODEL_LINES, Classification, classify_rules, from_hint
 from vaultai.context import AppContext
 from vaultai.domain import (
     LEGAL_DOC_TYPES,
+    REPROCESSABLE,
     SCHEMA_VERSION,
     ApprovalKind,
     AuditAction,
@@ -36,7 +38,6 @@ from vaultai.domain import (
     DocStatus,
     DocType,
     FieldOrigin,
-    InvalidTransition,
     IssueCode,
     ModelKind,
     ObligationStatus,
@@ -46,7 +47,6 @@ from vaultai.domain import (
     SummaryClaim,
     TextMethod,
     ValueType,
-    check_transition,
 )
 from vaultai.extraction import Found, Item
 from vaultai.extraction.rules import extract_fields, kv_label
@@ -59,7 +59,7 @@ from vaultai.parsing.tables import line_items
 from vaultai.pipeline import cache
 from vaultai.pipeline.projection import project
 from vaultai.schemas import KV_PREFIX, SCHEMAS
-from vaultai.validation import PROCESS_CODES, Issue
+from vaultai.validation import INJECTION_CODES, PROCESS_CODES, Issue
 from vaultai.validation.injection import flag_lines
 from vaultai.validation.rules import FieldView, Peer, Snapshot, validate
 
@@ -67,6 +67,7 @@ log = get_logger("vaultai.pipeline")
 ACTOR = "pipeline"
 AUTO_APPROVER = "policy:auto-approve"
 MAX_FACTS = 8
+OCR_WORKERS = 4
 MODEL_UNAVAILABLE = "The local model could not be reached; rules-only results were kept for review."
 
 
@@ -74,27 +75,17 @@ MODEL_UNAVAILABLE = "The local model could not be reached; rules-only results we
 
 
 def request_processing(ctx: AppContext, doc_ids: list[str], *, actor: str, reprocess: bool = False) -> list[str]:
+    allowed = REPROCESSABLE if reprocess else frozenset({DocStatus.IMPORTED, DocStatus.FAILED})
+    action = AuditAction.REPROCESS if reprocess else AuditAction.PROCESS
     queued: list[str] = []
     with ctx.db() as conn:
         for doc_id in dict.fromkeys(doc_ids):
             with db.transaction(conn):
                 row = conn.execute("SELECT status FROM documents WHERE id = ?", (doc_id,)).fetchone()
-                if row is None:
+                if row is None or DocStatus(row["status"]) not in allowed:
                     continue
-                current = DocStatus(row["status"])
-                if not reprocess and current not in (DocStatus.IMPORTED, DocStatus.FAILED):
-                    continue
-                try:
-                    check_transition(current, DocStatus.PROCESSING)
-                except InvalidTransition:
-                    continue
-                conn.execute(
-                    "UPDATE documents SET status = ?, stage = ?, error = NULL, approved_at = NULL, approved_by = NULL, "
-                    "approval_kind = NULL, deferred_at = NULL, updated_at = ? WHERE id = ?",
-                    (DocStatus.PROCESSING.value, "Queued", db.iso(), doc_id),
-                )
-                db.audit(conn, AuditAction.REPROCESS if reprocess else AuditAction.PROCESS, actor, doc_id=doc_id,
-                         before=current.value, after=DocStatus.PROCESSING.value)
+                db.set_status(conn, doc_id, DocStatus.PROCESSING, actor=actor, action=action,
+                              columns={"stage": "Queued", "error": None})
             queued.append(doc_id)
     if ctx.queue is not None:
         for doc_id in queued:
@@ -180,24 +171,24 @@ def _read_pages(ctx: AppContext, doc_id: str, row: sqlite3.Row, run: Run, model:
     ]
     needs_text = [p for p in pages if p.text_method == TextMethod.NONE.value and p.image]
     engine = ocr.engine_for(settings) if needs_text else None
+    if engine is not None:
+        run.ocr_engine = engine.name
+        ocr_words = _ocr_pages(ctx, doc_id, engine, needs_text, out_dir)
     for i, page in enumerate(needs_text, start=1):
-        png = (out_dir / page.image).read_bytes()
         hidden = [ln for ln in page.lines if ln.flag]
         if engine is not None:
-            _stage(ctx, doc_id, f"OCR page {i}/{len(needs_text)}")
-            run.ocr_engine = engine.name
-            words = _ocr_words(ctx, engine, page, png)
+            words = ocr_words[page.page_no]
             lines = merge_words(words, page.page_no, page.height / page.width)
             confs = [w.conf for w in words if w.conf is not None]
             page = replace(page, text_method=TextMethod.OCR.value if lines else TextMethod.NONE.value,
                            ocr_confidence=round(sum(confs) / len(confs), 4) if confs else None, lines=())
         elif ctx.model.vision:
             _stage(ctx, doc_id, f"Reading page {i}/{len(needs_text)} with the model")
-            raw = model.ask(TranscribeTask(png))
+            raw = model.ask(TranscribeTask((out_dir / page.image).read_bytes()))
             texts, issues = grounding.ground_transcribe(raw) if raw is not None else ([], [])
             run.issues.extend(issues)
             run.route = Route.VISION
-            # Transcribed text is model output: it carries the model confidence cap, so it can reach review but never auto-approval.
+            # Transcribed text is model output: it carries the model confidence cap, and the vision route never auto-approves.
             lines = [Line(f"p{page.page_no}.l{n}", t, None, grounding.MODEL_CONFIDENCE_CAP, text_spans(t))
                      for n, t in enumerate(texts, start=1)]
             page = replace(page, text_method=TextMethod.VISION.value if lines else TextMethod.NONE.value, lines=())
@@ -213,13 +204,30 @@ def _renumber(page_no: int, lines: list[Line]) -> tuple[Line, ...]:
     return tuple(replace(ln, id=f"p{page_no}.l{n}") for n, ln in enumerate(ordered, start=1))
 
 
-def _ocr_words(ctx: AppContext, engine: ocr.OcrEngine, page: Page, png: bytes) -> list[Word]:
+def _ocr_pages(ctx: AppContext, doc_id: str, engine: ocr.OcrEngine, pages: list[Page],
+               image_dir: Path) -> dict[int, list[Word]]:
+    """Words by page number. Each page is its own single-threaded Tesseract process, so a few run side by side."""
+    words: dict[int, list[Word]] = {}
+    _stage(ctx, doc_id, f"OCR 0/{len(pages)}")
+    pool = ThreadPoolExecutor(max_workers=min(OCR_WORKERS, len(pages)))
+    try:
+        pending = {pool.submit(_ocr_words, ctx, engine, p, image_dir / p.image): p.page_no for p in pages}
+        for done in as_completed(pending):
+            words[pending[done]] = done.result()
+            _stage(ctx, doc_id, f"OCR {len(words)}/{len(pages)}")
+    finally:
+        pool.shutdown(cancel_futures=True)
+    return words
+
+
+def _ocr_words(ctx: AppContext, engine: ocr.OcrEngine, page: Page, png: Path) -> list[Word]:
+    """Runs on a pool thread: every cache access opens its own connection."""
     key = cache.key("ocr", page.image_sha256 or "", engine.name)
     with ctx.db() as conn:
         hit = cache.get(conn, key)
     if hit is not None:
         return [Word(w[0], tuple(w[1]), w[2]) for w in hit]
-    words = engine.read(png)
+    words = engine.read(png.read_bytes())
     with ctx.db() as conn:
         cache.put(conn, key, [[w.text, list(w.box), w.conf] for w in words])
     return words
@@ -230,7 +238,7 @@ def _model_lines(doc: Doc) -> tuple[DocLine, ...]:
     return tuple(DocLine(ln.id, ln.text) for ln in doc.visible)
 
 
-def _classify(ctx: AppContext, doc: Doc, hint: str | None, model: _Model, run: Run) -> Classification:
+def _classify(doc: Doc, hint: str | None, model: _Model, run: Run) -> Classification:
     if hint:
         return from_hint(DocType(hint))
     rules = classify_rules(doc)
@@ -312,7 +320,7 @@ def _work(ctx: AppContext, doc_id: str, row: sqlite3.Row, run: Run) -> None:
     run.pages = list(doc.pages)
 
     _stage(ctx, doc_id, "Classifying")
-    run.classification = _classify(ctx, doc, row["doc_type_hint"], model, run)
+    run.classification = _classify(doc, row["doc_type_hint"], model, run)
     doc_type = run.classification.doc_type
 
     _stage(ctx, doc_id, "Extracting fields")
@@ -424,15 +432,14 @@ def _move_images(ctx: AppContext, doc_id: str, run: Run) -> None:
 
 
 def _snapshot(ctx: AppContext, conn: sqlite3.Connection, doc_id: str, doc_type: DocType) -> Snapshot:
-    fields: dict[str, FieldView] = {}
-    for r in conn.execute("SELECT * FROM fields WHERE doc_id = ? ORDER BY id", (doc_id,)):
-        edited = r["edited_at"] is not None
-        fields[r["key"]] = FieldView(
-            key=r["key"], label=r["label"], value_type=ValueType(r["value_type"]), required=bool(r["required"]),
-            value=r["human_value"] if edited else r["ai_value"], raw_text=None if edited else r["raw_text"],
-            currency=r["currency"], confidence=1.0 if edited else r["confidence"],
-            origin=FieldOrigin.HUMAN if edited else FieldOrigin(r["ai_origin"]), evidence=db.evidence_from_row(r),
+    fields = {
+        f.key: FieldView(
+            key=f.key, label=f.label, value_type=f.value_type, required=f.required, value=f.value,
+            raw_text=None if f.edited_at else f.raw_text, currency=f.currency,
+            confidence=1.0 if f.edited_at else f.confidence, origin=f.origin, evidence=f.evidence,
         )
+        for f in repo.load_fields(conn, doc_id)
+    }
     items = tuple(
         Item(r["description"], *(Decimal(r[k]) if r[k] is not None else None for k in ("quantity", "unit_price", "amount")),
              db.evidence_from_row(r))
@@ -440,8 +447,7 @@ def _snapshot(ctx: AppContext, conn: sqlite3.Connection, doc_id: str, doc_type: 
     )
     pages, ocr_conf = [], {}
     for r in conn.execute("SELECT * FROM pages WHERE doc_id = ? ORDER BY page_no", (doc_id,)):
-        lines = tuple(Line(d["id"], d["text"], tuple(d["bbox"]) if d.get("bbox") else None, d.get("confidence"), (),
-                           d.get("flag")) for d in json.loads(r["lines_json"]))
+        lines = tuple(Line.from_json(d) for d in json.loads(r["lines_json"]))
         pages.append(Page(r["page_no"], r["width"], r["height"], r["text_method"], lines, r["image_name"], r["page_hash"],
                           r["ocr_confidence"]))
         if r["text_method"] in (TextMethod.OCR.value, TextMethod.VISION.value):
@@ -472,10 +478,15 @@ def _snapshot(ctx: AppContext, conn: sqlite3.Connection, doc_id: str, doc_type: 
                     ctx.settings.review_confidence_threshold, ctx.settings.unusual_amount)
 
 
-def revalidate(ctx: AppContext, conn: sqlite3.Connection, doc_id: str) -> None:
+def revalidate(ctx: AppContext, conn: sqlite3.Connection,
+               doc_id: str) -> tuple[Snapshot, list[tuple[IssueCode, Severity]]] | None:
+    """Rebuild issues and the summary columns from stored records. Caller holds the transaction.
+
+    Returns the snapshot and every issue on the document (processing issues included), or None before classification.
+    """
     row = conn.execute("SELECT doc_type, filename FROM documents WHERE id = ?", (doc_id,)).fetchone()
     if row is None or row["doc_type"] is None:
-        return
+        return None
     doc_type = DocType(row["doc_type"])
     snap = _snapshot(ctx, conn, doc_id, doc_type)
     conn.execute(f"DELETE FROM issues WHERE doc_id = ? AND code NOT IN ({','.join('?' * len(PROCESS_CODES))})",  # noqa: S608
@@ -488,7 +499,7 @@ def revalidate(ctx: AppContext, conn: sqlite3.Connection, doc_id: str) -> None:
         "SELECT due_date FROM obligations WHERE doc_id = ? AND status = ? AND due_date IS NOT NULL",
         (doc_id, ObligationStatus.OPEN.value))]
     p = project(doc_type, snap.fields, deadlines, (c.risk for c in snap.clauses), issues)
-    injected = any(code in (IssueCode.PROMPT_INJECTION, IssueCode.HIDDEN_TEXT) for code, _ in issues)
+    injected = any(code in INJECTION_CODES for code, _ in issues)
     conn.execute(
         "UPDATE documents SET title = ?, counterparty = ?, doc_date = ?, total_amount = ?, currency = ?, primary_id = ?, "
         "next_deadline = ?, confidence = ?, risk_level = ?, injection_suspected = ?, updated_at = ? WHERE id = ?",
@@ -498,22 +509,28 @@ def revalidate(ctx: AppContext, conn: sqlite3.Connection, doc_id: str) -> None:
     body = "\n".join([*(ln.text for ln in snap.doc.visible), *(f.value for f in snap.fields.values() if f.value)])
     conn.execute("DELETE FROM doc_fts WHERE doc_id = ?", (doc_id,))
     conn.execute("INSERT INTO doc_fts (doc_id, filename, body) VALUES (?, ?, ?)", (doc_id, row["filename"], body))
+    return snap, issues
 
 
 # ---------------------------------------------------------------- routing
 
+TRUSTED_ORIGINS = frozenset({FieldOrigin.RULES, FieldOrigin.HUMAN})
 
-def decide(doc_type: DocType, issues: list[tuple[IssueCode, Severity]], required: list[FieldView],
+
+def decide(doc_type: DocType, route: Route, issues: list[tuple[IssueCode, Severity]], required: list[FieldView],
            auto_types: frozenset[DocType], auto_min: float, review_min: float) -> tuple[DocStatus, str | None]:
-    """(final status, the auto-approve rule that applied, if any). Pure: the review policy in one place."""
-    blocking = [code for code, sev in issues if sev in (Severity.WARNING, Severity.ERROR)]
-    injected = any(code in (IssueCode.PROMPT_INJECTION, IssueCode.HIDDEN_TEXT) for code in blocking)
-    if blocking or injected:
+    """(final status, the auto-approve rule that applied, if any). Pure: the review policy in one place.
+
+    Model output never auto-approves, whatever the thresholds: the route must be FAST (no model read the page, chose
+    the type, or was asked for fields) and every required value must come from the rules or a person. Injection
+    codes are errors, so they always block.
+    """
+    if any(sev in (Severity.WARNING, Severity.ERROR) for _, sev in issues):
         return DocStatus.NEEDS_REVIEW, None
     if any(f.value is None or f.confidence < review_min for f in required):
         return DocStatus.NEEDS_REVIEW, None
-    confident = all(f.confidence >= auto_min for f in required)
-    if doc_type in auto_types and doc_type not in LEGAL_DOC_TYPES and confident:
+    deterministic = route is Route.FAST and all(f.origin in TRUSTED_ORIGINS for f in required)
+    if doc_type in auto_types and deterministic and all(f.confidence >= auto_min for f in required):
         rule = (f"{doc_type.value} auto-approve policy: no warnings or errors, no injection, and every required field "
                 f"read with confidence of at least {auto_min:.2f}")
         return DocStatus.APPROVED, rule
@@ -522,55 +539,44 @@ def decide(doc_type: DocType, issues: list[tuple[IssueCode, Severity]], required
 
 def _finish(ctx: AppContext, conn: sqlite3.Connection, doc_id: str, run: Run, ms: int) -> DocStatus:
     c = run.classification
-    route = run.route
     conn.execute(
         "UPDATE documents SET doc_type = ?, doc_type_confidence = ?, classification_method = ?, page_count = ?, route = ?, "
-        "model_kind = ?, model_name = ?, schema_version = ?, ocr_engine = ?, summary_json = ?, updated_at = ? WHERE id = ?",
-        (c.doc_type.value, c.confidence, c.method.value, run.page_count, route.value, ctx.model.kind.value,
-         ctx.model.name, SCHEMA_VERSION, run.ocr_engine, run.summary.model_dump_json() if run.summary else None,
-         db.iso(), doc_id),
+        "model_kind = ?, model_name = ?, schema_version = ?, ocr_engine = ?, summary_json = ? WHERE id = ?",
+        (c.doc_type.value, c.confidence, c.method.value, run.page_count, run.route.value, ctx.model.kind.value,
+         ctx.model.name, SCHEMA_VERSION, run.ocr_engine, run.summary.model_dump_json() if run.summary else None, doc_id),
     )
-    status = DocStatus.PROCESSING
-    for nxt, stage in ((DocStatus.EXTRACTED, "Validating"), (DocStatus.VALIDATED, "Routing")):
-        check_transition(status, nxt)
-        conn.execute("UPDATE documents SET status = ?, stage = ? WHERE id = ?", (nxt.value, stage, doc_id))
-        status = nxt
-        if nxt is DocStatus.EXTRACTED:
-            revalidate(ctx, conn, doc_id)
+    db.set_status(conn, doc_id, DocStatus.EXTRACTED, actor=ACTOR)
+    snap, issues = revalidate(ctx, conn, doc_id)
+    db.set_status(conn, doc_id, DocStatus.VALIDATED, actor=ACTOR)
 
-    issues = [(IssueCode(r["code"]), Severity(r["severity"]))
-              for r in conn.execute("SELECT code, severity FROM issues WHERE doc_id = ?", (doc_id,))]
-    required = [f for f in _snapshot(ctx, conn, doc_id, c.doc_type).fields.values() if f.required]
     s = ctx.settings
-    final, rule = decide(c.doc_type, issues, required, s.auto_approve_types, s.auto_approve_min_confidence,
+    required = [f for f in snap.fields.values() if f.required]
+    final, rule = decide(c.doc_type, run.route, issues, required, s.auto_approve_types, s.auto_approve_min_confidence,
                          s.review_confidence_threshold)
-    check_transition(status, final)
-    now = db.iso()
-    conn.execute(
-        "UPDATE documents SET status = ?, stage = NULL, error = NULL, processing_ms = ?, processed_at = ?, updated_at = ?, "
-        "approved_at = ?, approved_by = ?, approval_kind = ? WHERE id = ?",
-        (final.value, ms, now, now, now if rule else None, AUTO_APPROVER if rule else None,
-         ApprovalKind.POLICY.value if rule else None, doc_id),
-    )
+    # The history shows processing -> outcome; extracted and validated only exist inside this transaction.
     db.audit(conn, AuditAction.PROCESS, ACTOR, doc_id=doc_id, before=DocStatus.PROCESSING.value, after=final.value,
-             note=f"route={route.value} pages={run.page_count}")
-    if rule:
-        db.audit(conn, AuditAction.AUTO_APPROVE, AUTO_APPROVER, doc_id=doc_id, before=DocStatus.VALIDATED.value,
-                 after=DocStatus.APPROVED.value, note=rule)
+             note=f"route={run.route.value} pages={run.page_count}")
+    now = db.now()
+    columns: dict[str, object] = {"stage": None, "error": None, "processing_ms": ms, "processed_at": db.iso(now)}
+    if rule is None:
+        db.set_status(conn, doc_id, final, actor=ACTOR, columns=columns, at=now)
+    else:
+        columns |= {"approved_at": db.iso(now), "approved_by": AUTO_APPROVER, "approval_kind": ApprovalKind.POLICY.value}
+        db.set_status(conn, doc_id, final, actor=AUTO_APPROVER, action=AuditAction.AUTO_APPROVE, note=rule,
+                      columns=columns, at=now)
     return final
 
 
 def _fail(ctx: AppContext, doc_id: str, exc: Exception) -> None:
+    """A failure inside the final transaction rolls back to processing, so this only ever moves processing -> failed."""
     reason = f" ({exc.reason})" if isinstance(exc, isolate.ParseFailed) else ""
     message = f"{type(exc).__name__}{reason}: the document could not be processed."
     with ctx.db() as conn, db.transaction(conn):
         row = conn.execute("SELECT status FROM documents WHERE id = ?", (doc_id,)).fetchone()
         if row is None or DocStatus(row["status"]) is not DocStatus.PROCESSING:
             return
-        conn.execute("UPDATE documents SET status = ?, stage = NULL, error = ?, updated_at = ? WHERE id = ?",
-                     (DocStatus.FAILED.value, message, db.iso(), doc_id))
-        db.audit(conn, AuditAction.PROCESS, ACTOR, doc_id=doc_id, before=DocStatus.PROCESSING.value,
-                 after=DocStatus.FAILED.value, note=f"failed: {type(exc).__name__}{reason}")
+        db.set_status(conn, doc_id, DocStatus.FAILED, actor=ACTOR, action=AuditAction.PROCESS,
+                      note=f"failed: {type(exc).__name__}{reason}", columns={"stage": None, "error": message})
 
 
 def process_document(ctx: AppContext, doc_id: str) -> None:

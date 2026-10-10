@@ -14,6 +14,8 @@ import re
 import secrets
 import unicodedata
 import zlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -201,21 +203,28 @@ def static_check(settings: Settings, name: str, data: bytes) -> Sniffed | Reject
     return Sniffed(ext, MIME[ext])
 
 
-def probe_check(settings: Settings, sniffed: Sniffed, data: bytes) -> Accepted | Rejected:
-    if sniffed.ext == "txt":
-        pages = -(-len(data.decode("utf-8-sig").splitlines() or [""]) // TEXT_LINES_PER_PAGE)
-        return Rejected(TOO_MANY_PAGES) if pages > settings.max_pages else Accepted(sniffed.ext, sniffed.mime, pages)
+@contextmanager
+def staged(settings: Settings, ext: str, data: bytes) -> Iterator[Path]:
+    """The upload in an owner-only temp file for the parser to probe. Deleted on exit; hard-link it to keep it."""
     settings.tmp_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path = settings.tmp_dir / f"probe-{secrets.token_hex(8)}.{sniffed.ext}"
+    path = settings.tmp_dir / f"probe-{secrets.token_hex(8)}.{ext}"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
-        info = isolate.probe(settings, Path(path), sniffed.ext)
-    except isolate.ParseFailed:
-        return Rejected(UNSAFE)
+        yield path
     finally:
         path.unlink(missing_ok=True)
+
+
+def probe_check(settings: Settings, sniffed: Sniffed, data: bytes, path: Path) -> Accepted | Rejected:
+    if sniffed.ext == "txt":
+        pages = -(-len(data.decode("utf-8-sig").splitlines() or [""]) // TEXT_LINES_PER_PAGE)
+        return Rejected(TOO_MANY_PAGES) if pages > settings.max_pages else Accepted(sniffed.ext, sniffed.mime, pages)
+    try:
+        info = isolate.probe(settings, path, sniffed.ext)
+    except isolate.ParseFailed:
+        return Rejected(UNSAFE)
     if info.get("active") and settings.reject_active_pdf:
         return Rejected(ACTIVE)
     if info.get("too_large"):
@@ -226,8 +235,3 @@ def probe_check(settings: Settings, sniffed: Sniffed, data: bytes) -> Accepted |
     if pages > settings.max_pages:
         return Rejected(TOO_MANY_PAGES)
     return Accepted(sniffed.ext, sniffed.mime, pages)
-
-
-def check(settings: Settings, name: str, data: bytes) -> Accepted | Rejected:
-    first = static_check(settings, name, data)
-    return first if isinstance(first, Rejected) else probe_check(settings, first, data)

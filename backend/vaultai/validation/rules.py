@@ -337,6 +337,7 @@ def unsafe_model_values(s: Snapshot) -> Iterable[Issue]:
 
 
 ALL = None
+ITEMIZED = frozenset(t for t, schema in SCHEMAS.items() if schema.has_line_items)
 RULES: tuple[tuple[frozenset[DocType] | None, Rule], ...] = (
     (ALL, unreadable),
     (ALL, low_ocr),
@@ -344,9 +345,9 @@ RULES: tuple[tuple[frozenset[DocType] | None, Rule], ...] = (
     (ALL, low_confidence),
     (ALL, invalid_dates),
     (frozenset(DATE_PAIRS), date_order),
-    (frozenset({D.INVOICE, D.RECEIPT, D.PURCHASE_ORDER, D.PROPOSAL}), line_item_sum),
-    (frozenset({D.INVOICE, D.RECEIPT, D.PURCHASE_ORDER, D.PROPOSAL}), totals),
-    (frozenset({D.INVOICE, D.RECEIPT, D.PURCHASE_ORDER, D.PROPOSAL}), tax_rate),
+    (ITEMIZED, line_item_sum),
+    (ITEMIZED, totals),
+    (ITEMIZED, tax_rate),
     (ALL, currencies),
     (frozenset({D.CHECK}), written_vs_numeric),
     (frozenset({D.CHECK}), micr_matches),

@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ctx: AppContext = app.state.ctx
     if ctx.settings.egress_guard:
         install_egress_guard()
-    await start_queue(app)
+    await start_queue(ctx)
     stop_phone = None
     if ctx.settings.phone_enabled:
         stop_phone = start_listener(ctx)
@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if stop_phone is not None:
             stop_phone()
-        await stop_queue(app)
+        await stop_queue(ctx)
 
 
 def _mount_frontend(app: FastAPI, dist: Path) -> None:
@@ -71,7 +71,6 @@ def create_app(settings: Settings | None = None, *, model: ModelAdapter | None =
     app = FastAPI(title="VaultAI", version=APP_VERSION, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.ctx = build_context(settings, model)
     app.state.scanner = build_scanner(settings)
-    app.state.job_queue = None
     install_error_handlers(app)
     install_desktop_guard(app, settings)
     for module in ROUTERS:
