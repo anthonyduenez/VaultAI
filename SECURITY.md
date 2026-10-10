@@ -49,7 +49,7 @@ There is one operator. VaultAI has no accounts, sessions, or roles. `VAULTAI_REV
 | Listener | Bind | Default | Who can reach it |
 | --- | --- | --- | --- |
 | Desktop API and UI | `VAULTAI_HOST:VAULTAI_PORT` | `127.0.0.1:8765` | this machine |
-| Phone listener | `0.0.0.0:VAULTAI_PHONE_PORT` | `0.0.0.0:8766`, off | devices with a private, loopback, or link-local source address |
+| Phone listener | the LAN address in the QR code (`VAULTAI_PHONE_HOST` or auto-detected), `VAULTAI_PHONE_PORT` | `<lan-ip>:8766`, off | devices with a private, loopback, or link-local source address |
 | Vite dev server | `127.0.0.1:5173` | development only | this machine. Proxies `/api` with the `Host` header rewritten to `127.0.0.1:8765`. |
 
 Outbound connections the app makes: the model endpoint (when `openai_compat`), and a UDP `connect()` to `10.255.255.255` that selects the outbound interface for the QR code without sending a packet. Nothing else. `VAULTAI_EGRESS_GUARD=true` enforces this in-process.

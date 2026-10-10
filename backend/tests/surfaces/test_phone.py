@@ -5,20 +5,25 @@ import io
 import ipaddress
 import json
 import re
+import socket
+import time
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pypdfium2 as pdfium
 import pytest
+from conftest import make_ctx
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from tests.surfaces.conftest import FakeCore, make_client
 from vaultai import db
 from vaultai.capture import phone
-from vaultai.config import Settings
+from vaultai.config import ConfigError, Settings
 from vaultai.context import AppContext
-from vaultai.phone_app import create_phone_app
+from vaultai.phone_app import create_phone_app, start_listener
 
 
 @pytest.fixture
@@ -173,3 +178,26 @@ def test_lan_ip_prefers_configured_host_and_otherwise_returns_an_address(phone_s
     assert phone.lan_ip(phone_settings) == "192.168.1.10"
     detected = phone.lan_ip(Settings(data_dir=phone_settings.data_dir))
     assert ipaddress.ip_address(detected).version == 4
+
+
+def test_listener_refuses_to_bind_a_public_address(settings: Settings) -> None:
+    ctx = make_ctx(replace(settings, phone_host="8.8.8.8"))
+    with pytest.raises(ConfigError, match="private LAN address, not 8.8.8.8"):
+        start_listener(ctx)
+
+
+def test_listener_serves_only_on_the_qr_address(settings: Settings) -> None:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    stop = start_listener(make_ctx(replace(settings, phone_host="127.0.0.1", phone_port=port)))
+    try:
+        for _ in range(50):
+            try:
+                status = httpx.get(f"http://127.0.0.1:{port}/m/unknown").status_code
+                break
+            except httpx.ConnectError:
+                time.sleep(0.05)
+        assert status == 404
+    finally:
+        stop()

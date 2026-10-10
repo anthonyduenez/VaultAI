@@ -15,6 +15,7 @@ from starlette.datastructures import UploadFile
 
 from vaultai import db
 from vaultai.capture import phone
+from vaultai.config import ConfigError, is_local_host
 from vaultai.context import AppContext
 from vaultai.domain import IntakeItem
 from vaultai.repo import Problem
@@ -84,9 +85,15 @@ def create_phone_app(ctx: AppContext) -> FastAPI:
 
 
 def start_listener(ctx: AppContext) -> Callable[[], None]:
-    """Serve the phone app on every interface from a background thread; returns the function that stops it."""
+    """Serve the phone app on the one LAN address the QR code names; returns the function that stops it.
+
+    Refuses to start when that address is not loopback, private, or link-local.
+    """
+    host = phone.lan_ip(ctx.settings)
+    if not is_local_host(host):
+        raise ConfigError(f"phone capture needs a private LAN address, not {host}; set VAULTAI_PHONE_HOST")
     config = uvicorn.Config(
-        create_phone_app(ctx), host="0.0.0.0", port=ctx.settings.phone_port, log_level="warning",
+        create_phone_app(ctx), host=host, port=ctx.settings.phone_port, log_level="warning",
         lifespan="off", proxy_headers=False, server_header=False, access_log=False,
     )
     server = uvicorn.Server(config)

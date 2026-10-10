@@ -113,7 +113,7 @@ Desktop side (loopback API):
 | GET | `/api/phone/sessions/{id}` | | `CaptureSession` (poll for `completed` + `document_id`) |
 | DELETE | `/api/phone/sessions/{id}` | | `204` (cancel; token dies immediately) |
 
-Phone side: a **separate** listener on `0.0.0.0:<phone_port>` that serves only these routes and
+Phone side: a **separate** listener on the LAN address in the QR code (`<lan-ip>:<phone_port>`, never `0.0.0.0`; it refuses to start on a non-private address) that serves only these routes and
 rejects any client whose IP is not loopback/private/link-local:
 
 | Method | Path | Notes |

@@ -44,7 +44,7 @@ Processes on the machine:
 | Process | Binds to | Purpose |
 | --- | --- | --- |
 | Desktop API and built frontend | `127.0.0.1:8765` | FastAPI app. Serves `/api/*` and, when `frontend/dist` exists, the React UI. Refuses requests whose `Host` header is not local and state changes without the `X-VaultAI: 1` header. |
-| Phone listener (optional) | `0.0.0.0:8766` | A separate FastAPI app with three routes. Rejects any client that is not on a loopback, private, or link-local address. Off by default. |
+| Phone listener (optional) | `<lan-ip>:8766` | A separate FastAPI app with three routes. Rejects any client that is not on a loopback, private, or link-local address. Off by default. |
 | Parser worker | none | `python -I vaultai/parsing/worker.py`, one subprocess per document, with CPU and file-size limits, a 60 s timeout, and an address-space cap on Linux. |
 | tesseract | none | Runs as a subprocess on the PNG the parser produced, never on the uploaded bytes. |
 | Local model server | your choice, local address only | Any OpenAI-compatible server. VaultAI talks to it over HTTP with proxies disabled. A public hostname is refused at startup. |
@@ -253,7 +253,7 @@ The SANE path was not tested on real hardware during this hackathon. The mock sc
 
 ## Phone capture
 
-Phone capture is off by default. To enable it, set `VAULTAI_PHONE_ENABLED=true` in `.env` and restart. VaultAI then opens a second listener on `0.0.0.0:8766` (`VAULTAI_PHONE_PORT`). Set `VAULTAI_PHONE_HOST` to the LAN IP you want in the QR code if auto-detection picks the wrong interface. Set `VAULTAI_PHONE_ENABLED=false` and restart to disable it again.
+Phone capture is off by default. To enable it, set `VAULTAI_PHONE_ENABLED=true` in `.env` and restart. VaultAI then opens a second listener on the LAN address it puts in the QR code, port 8766 (`VAULTAI_PHONE_PORT`). It binds only that address and refuses to start if the address is not private, loopback, or link-local. Set `VAULTAI_PHONE_HOST` to the LAN IP you want in the QR code if auto-detection picks the wrong interface. Set `VAULTAI_PHONE_ENABLED=false` and restart to disable it again.
 
 Pairing workflow:
 
