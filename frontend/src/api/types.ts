@@ -73,6 +73,9 @@ export const CaptureKindValues: CaptureKind[] = ["phone", "scanner"];
 export type CaptureStatus = "active" | "completed" | "cancelled" | "expired";
 export const CaptureStatusValues: CaptureStatus[] = ["active", "completed", "cancelled", "expired"];
 
+export type DocumentSort = "created_at" | "doc_date" | "total_amount" | "confidence" | "filename" | "next_deadline";
+export const DocumentSortValues: DocumentSort[] = ["created_at", "doc_date", "total_amount", "confidence", "filename", "next_deadline"];
+
 export type ExportFormat = "xlsx" | "csv";
 export const ExportFormatValues: ExportFormat[] = ["xlsx", "csv"];
 
@@ -95,6 +98,18 @@ export const DOC_TYPE_LABELS: Record<DocType, string> = {
 };
 
 export const LEGAL_DOC_TYPES: DocType[] = ["agreement_letter", "contract", "policy", "statement_of_work"];
+
+export const REVIEWABLE: DocStatus[] = ["needs_review", "ready"];
+export const EXPORTABLE: DocStatus[] = ["approved", "exported"];
+export const EDITABLE: DocStatus[] = ["approved", "exported", "needs_review", "ready", "rejected"];
+export const REPROCESSABLE: DocStatus[] = ["approved", "exported", "failed", "imported", "needs_review", "ready", "rejected"];
+
+export const REVIEW_ACTION_FROM: Record<ReviewAction, DocStatus[]> = {
+  approve: ["needs_review", "ready"],
+  reject: ["needs_review", "ready"],
+  defer: ["needs_review", "ready"],
+  reopen: ["approved", "exported", "rejected"],
+};
 
 export interface Evidence {
   page: number | null;
@@ -526,6 +541,10 @@ export interface CaptureSession {
   expires_at: string | null;
   intake_id: number | null;
   document_id: string | null;
+}
+
+export interface NewScanSession {
+  device_id: string;
 }
 
 export interface ScanRequest {

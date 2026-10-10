@@ -91,8 +91,10 @@ REVIEWABLE: frozenset[DocStatus] = frozenset({_S.READY, _S.NEEDS_REVIEW})
 
 
 class InvalidTransition(ValueError):
+    """str() is the user-facing reason; it names only statuses, never document content."""
+
     def __init__(self, current: DocStatus, target: DocStatus) -> None:
-        super().__init__(f"cannot move a document from {current} to {target}")
+        super().__init__(f"Not allowed while the document is {current.value.replace('_', ' ')}.")
         self.current = current
         self.target = target
 
@@ -100,6 +102,11 @@ class InvalidTransition(ValueError):
 def check_transition(current: DocStatus, target: DocStatus) -> None:
     if target not in TRANSITIONS[current]:
         raise InvalidTransition(current, target)
+
+
+# Field corrections are allowed once processing has settled.
+EDITABLE: frozenset[DocStatus] = REVIEWABLE | EXPORTABLE | {_S.REJECTED}
+REPROCESSABLE: frozenset[DocStatus] = frozenset(s for s, targets in TRANSITIONS.items() if _S.PROCESSING in targets)
 
 
 class Source(StrEnum):
@@ -229,6 +236,25 @@ class ReviewAction(StrEnum):
     REOPEN = "reopen"
 
 
+REVIEW_ACTION_TARGET: dict[ReviewAction, DocStatus] = {
+    ReviewAction.APPROVE: _S.APPROVED,
+    ReviewAction.REJECT: _S.REJECTED,
+    ReviewAction.DEFER: _S.NEEDS_REVIEW,
+    ReviewAction.REOPEN: _S.NEEDS_REVIEW,
+}
+# Narrower than TRANSITIONS on purpose: a human decides only on records waiting for a decision,
+# and reopens only records that were already decided.
+REVIEW_ACTION_FROM: dict[ReviewAction, frozenset[DocStatus]] = {
+    ReviewAction.APPROVE: REVIEWABLE,
+    ReviewAction.REJECT: REVIEWABLE,
+    ReviewAction.DEFER: REVIEWABLE,
+    ReviewAction.REOPEN: frozenset({_S.APPROVED, _S.EXPORTED, _S.REJECTED}),
+}
+assert all(
+    REVIEW_ACTION_TARGET[a] in TRANSITIONS[s] for a, sources in REVIEW_ACTION_FROM.items() for s in sources
+), "REVIEW_ACTION_FROM allows a move the state machine forbids"
+
+
 class ApprovalKind(StrEnum):
     HUMAN = "human"
     POLICY = "policy"
@@ -286,6 +312,15 @@ class CaptureStatus(StrEnum):
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     EXPIRED = "expired"
+
+
+class DocumentSort(StrEnum):
+    CREATED_AT = "created_at"
+    DOC_DATE = "doc_date"
+    TOTAL_AMOUNT = "total_amount"
+    CONFIDENCE = "confidence"
+    FILENAME = "filename"
+    NEXT_DEADLINE = "next_deadline"
 
 
 class ExportFormat(StrEnum):
@@ -765,6 +800,10 @@ class CaptureSession(ApiModel):
     expires_at: datetime | None = None
     intake_id: int | None = None
     document_id: str | None = None
+
+
+class NewScanSession(ApiModel):
+    device_id: str = Field(min_length=1, max_length=300)
 
 
 class ScanRequest(ApiModel):

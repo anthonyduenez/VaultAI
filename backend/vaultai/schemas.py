@@ -41,8 +41,8 @@ class DocSchema:
     doc_date: str | None = None
     total: str | None = None
     primary_id: str | None = None
+    title: str | None = None
     has_line_items: bool = False
-    has_clauses: bool = False
 
     def field(self, key: str) -> FieldSpec:
         return next(f for f in self.fields if f.key == key)
@@ -162,7 +162,7 @@ SCHEMAS: dict[DocType, DocSchema] = {
             FieldSpec("signatories", "Signatories", T),
             FieldSpec("signature_status", "Signature status", E, True, options=SIGNATURE_STATUS),
         ),
-        counterparty="parties", doc_date="effective_date", total="contract_value", primary_id=None, has_clauses=True,
+        counterparty="parties", doc_date="effective_date", total="contract_value", title="title",
     ),
     DocType.STATEMENT_OF_WORK: DocSchema(
         DocType.STATEMENT_OF_WORK,
@@ -177,7 +177,7 @@ SCHEMAS: dict[DocType, DocSchema] = {
             FieldSpec("payment_terms", "Payment terms", LT),
             FieldSpec("signature_status", "Signature status", E, options=SIGNATURE_STATUS),
         ),
-        counterparty="provider", doc_date="effective_date", total="total", has_clauses=True,
+        counterparty="provider", doc_date="effective_date", total="total", title="title",
     ),
     DocType.AGREEMENT_LETTER: DocSchema(
         DocType.AGREEMENT_LETTER,
@@ -197,7 +197,7 @@ SCHEMAS: dict[DocType, DocSchema] = {
             FieldSpec("termination", "Termination language", LT),
             FieldSpec("signature_status", "Acceptance status", E, True, options=SIGNATURE_STATUS),
         ),
-        counterparty="sender_organization", doc_date="letter_date", total="compensation", has_clauses=True,
+        counterparty="sender_organization", doc_date="letter_date", total="compensation", title="subject",
     ),
     DocType.POLICY: DocSchema(
         DocType.POLICY,
@@ -209,7 +209,7 @@ SCHEMAS: dict[DocType, DocSchema] = {
             FieldSpec("effective_date", "Effective date", D, True, ("effective date",)),
             FieldSpec("review_date", "Next review", D, aliases=("next review", "review date")),
         ),
-        counterparty="owner", doc_date="effective_date", primary_id="policy_number", has_clauses=True,
+        counterparty="owner", doc_date="effective_date", primary_id="policy_number", title="title",
     ),
     DocType.ADMIN_FORM: DocSchema(
         DocType.ADMIN_FORM,
@@ -220,7 +220,7 @@ SCHEMAS: dict[DocType, DocSchema] = {
             FieldSpec("date", "Date", D, aliases=("date",)),
             FieldSpec("signature_present", "Signature present", B),
         ),
-        counterparty="submitted_by", doc_date="date", primary_id="form_number",
+        counterparty="submitted_by", doc_date="date", primary_id="form_number", title="form_title",
     ),
     DocType.CORRESPONDENCE: DocSchema(
         DocType.CORRESPONDENCE,
@@ -230,7 +230,7 @@ SCHEMAS: dict[DocType, DocSchema] = {
             FieldSpec("date", "Date", D, True, ("date",)),
             FieldSpec("subject", "Subject", T, aliases=("subject", "re")),
         ),
-        counterparty="sender", doc_date="date",
+        counterparty="sender", doc_date="date", title="subject",
     ),
     DocType.OTHER: DocSchema(
         DocType.OTHER,
@@ -242,14 +242,27 @@ SCHEMAS: dict[DocType, DocSchema] = {
             _CURRENCY,
             FieldSpec("reference", "Reference", ID, aliases=("reference", "ref", "id")),
         ),
-        counterparty="organization", doc_date="date", total="amount", primary_id="reference",
+        counterparty="organization", doc_date="date", total="amount", primary_id="reference", title="title",
     ),
 }
 
 # Generic key-value pairs found on any document are stored as extra fields with this key prefix.
 KV_PREFIX = "kv:"
 
+def _enum_options() -> dict[str, tuple[str, ...]]:
+    out: dict[str, tuple[str, ...]] = {}
+    for schema in SCHEMAS.values():
+        for spec in schema.fields:
+            if spec.options:
+                assert out.setdefault(spec.key, spec.options) == spec.options, f"{spec.key} options differ by type"
+    return out
+
+
 # Enum fields share their options across document types (currency, signature status).
-ENUM_OPTIONS: dict[str, tuple[str, ...]] = {
-    spec.key: spec.options for schema in SCHEMAS.values() for spec in schema.fields if spec.options
-}
+ENUM_OPTIONS: dict[str, tuple[str, ...]] = _enum_options()
+
+
+def match_option(key: str, text: str) -> str | None:
+    """The canonical option for `key` that `text` names, ignoring case, or None."""
+    wanted = text.strip().casefold()
+    return next((o for o in ENUM_OPTIONS.get(key, ()) if o.casefold() == wanted), None)

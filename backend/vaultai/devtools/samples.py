@@ -23,7 +23,7 @@ from pathlib import Path
 
 from vaultai.config import REPO_ROOT
 from vaultai.devtools.pdfgen import BLACK, GRAY, WHITE, Color, Page, PdfDoc, text_width, wrap
-from vaultai.domain import ClauseKind, DocType, IssueCode, ObligationKind
+from vaultai.domain import LEGAL_DOC_TYPES, ClauseKind, DocType, IssueCode, ObligationKind
 from vaultai.schemas import SCHEMAS
 
 D = Decimal
@@ -135,7 +135,7 @@ def expected(
     entry["expected_status"] = status
     if obligations is not None:
         entry["obligations"] = [o.as_json() for o in obligations]
-    if schema.has_clauses:
+    if schema.doc_type in LEGAL_DOC_TYPES:
         entry["risky_clause_kinds"] = [k.value for k in risky]
     return entry
 

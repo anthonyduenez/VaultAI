@@ -16,8 +16,9 @@ def test_foreign_host_header_is_refused_with_421(client: TestClient) -> None:
     assert response.json()["code"] == "misdirected_request"
 
 
-def test_vite_dev_proxy_host_is_accepted(client: TestClient) -> None:
-    assert client.get("/api/dashboard", headers={"Host": "localhost:5173"}).status_code == 200
+def test_dev_server_host_is_refused_because_the_proxy_rewrites_host(client: TestClient) -> None:
+    assert client.get("/api/dashboard", headers={"Host": "localhost:5173"}).status_code == 421
+    assert client.get("/api/dashboard", headers={"Host": "127.0.0.1:8765"}).status_code == 200
 
 
 def test_state_changing_request_without_header_is_refused(settings: Settings) -> None:

@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from vaultai.domain import AuditAction, Box, Evidence
+from vaultai.domain import EXPORTABLE, AuditAction, Box, DocStatus, Evidence, check_transition
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -114,6 +114,8 @@ CREATE TABLE IF NOT EXISTS line_items (
   evidence_text TEXT
 );
 
+CREATE INDEX IF NOT EXISTS idx_line_items_doc ON line_items(doc_id);
+
 CREATE TABLE IF NOT EXISTS issues (
   id INTEGER PRIMARY KEY,
   doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -127,6 +129,8 @@ CREATE TABLE IF NOT EXISTS issues (
   evidence_text TEXT,
   created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_issues_doc ON issues(doc_id);
 
 CREATE TABLE IF NOT EXISTS clauses (
   id INTEGER PRIMARY KEY,
@@ -143,6 +147,8 @@ CREATE TABLE IF NOT EXISTS clauses (
   line_id TEXT,
   evidence_text TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_clauses_doc ON clauses(doc_id);
 
 CREATE TABLE IF NOT EXISTS obligations (
   id INTEGER PRIMARY KEY,
@@ -161,6 +167,7 @@ CREATE TABLE IF NOT EXISTS obligations (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_obligations_due ON obligations(due_date);
+CREATE INDEX IF NOT EXISTS idx_obligations_doc ON obligations(doc_id);
 
 -- No foreign key: audit rows outlive the documents they describe.
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -191,6 +198,8 @@ CREATE TABLE IF NOT EXISTS intake (
   dismissed INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_intake_doc ON intake(document_id);
 
 CREATE TABLE IF NOT EXISTS exports (
   id TEXT PRIMARY KEY,
@@ -226,6 +235,8 @@ CREATE TABLE IF NOT EXISTS capture_pages (
   height INTEGER NOT NULL,
   created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_capture_pages_session ON capture_pages(session_id);
 
 -- OCR and model outputs keyed by content hash + engine/model/schema version.
 CREATE TABLE IF NOT EXISTS cache (
@@ -293,6 +304,42 @@ def audit(
         "INSERT INTO audit_log (at, actor, action, doc_id, field_key, before, after, note) VALUES (?,?,?,?,?,?,?,?)",
         (iso(), actor, action.value, doc_id, field_key, before, after, note),
     )
+
+
+def set_status(
+    conn: sqlite3.Connection,
+    doc_id: str,
+    target: DocStatus,
+    *,
+    actor: str,
+    action: AuditAction | None = None,
+    note: str | None = None,
+    columns: dict[str, object] | None = None,
+    at: datetime | None = None,
+) -> DocStatus:
+    """The one way a document's status changes. Returns the previous status.
+
+    Enforces the state machine, clears approval columns whenever the target is not an
+    approved state and clears deferral unless the caller sets it, then audits `action`.
+    Column names come from code, never from requests.
+    """
+    row = conn.execute("SELECT status FROM documents WHERE id = ?", (doc_id,)).fetchone()
+    if row is None:
+        raise LookupError(f"document {doc_id} not found")
+    current = DocStatus(row["status"])
+    check_transition(current, target)
+    changes: dict[str, object] = {"deferred_at": None}
+    if target not in EXPORTABLE:
+        changes |= {"approved_at": None, "approved_by": None, "approval_kind": None}
+    changes |= columns or {}
+    assignments = "".join(f", {column} = ?" for column in changes)
+    conn.execute(
+        f"UPDATE documents SET status = ?{assignments}, updated_at = ? WHERE id = ?",
+        (target.value, *changes.values(), iso(at), doc_id),
+    )
+    if action is not None:
+        audit(conn, action, actor, doc_id=doc_id, before=current.value, after=target.value, note=note)
+    return current
 
 
 def bump(conn: sqlite3.Connection, name: str, by: int = 1) -> None:

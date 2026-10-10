@@ -9,12 +9,12 @@ from __future__ import annotations
 import ipaddress
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlparse
 
-from vaultai.domain import DocType, ModelKind
+from vaultai.domain import LEGAL_DOC_TYPES, DocType, ModelKind
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -119,19 +119,12 @@ def _path(v: str) -> Path:
     return p if p.is_absolute() else (REPO_ROOT / p)
 
 
-_PARSERS = {
-    "data_dir": _path, "samples_dir": _path, "frontend_dist": _path, "host": str, "port": int,
-    "reviewer_name": str, "max_file_mb": int, "max_pages": int, "max_image_pixels": int,
-    "max_batch_files": int, "reject_active_pdf": _bool, "parse_timeout_s": int, "parse_memory_mb": int,
-    "workers": int, "model_backend": ModelKind, "model_endpoint": str, "model_name": str,
-    "model_api_key": str, "model_context_tokens": int, "model_max_tokens": int, "model_timeout_s": float,
-    "model_temperature": float, "model_vision": _bool, "model_json_mode": _bool, "model_system_prefix": str,
-    "ocr_engine": str, "tesseract_cmd": str, "auto_approve_types": _doc_types,
-    "auto_approve_min_confidence": float, "review_confidence_threshold": float, "unusual_amount": Decimal,
-    "date_order": str, "phone_enabled": _bool, "phone_host": str, "phone_port": int,
-    "phone_session_ttl_s": int, "phone_max_pages": int, "phone_max_image_mb": int,
-    "scanner_backend": str, "egress_guard": _bool,
+_BY_TYPE = {
+    "Path": _path, "str": str, "str | None": str, "int": int, "float": float, "bool": _bool,
+    "Decimal": Decimal, "ModelKind": ModelKind, "frozenset[DocType]": _doc_types,
 }
+# Every Settings field is settable as VAULTAI_<NAME>; its annotation picks the parser.
+_PARSERS = {f.name: _BY_TYPE[f.type] for f in fields(Settings)}
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -197,6 +190,10 @@ def _check(s: Settings) -> None:
                 f"VAULTAI_MODEL_ENDPOINT host {host!r} is not a loopback or private-network address; "
                 "VaultAI only talks to local models"
             )
+    if legal := s.auto_approve_types & LEGAL_DOC_TYPES:
+        raise ConfigError(
+            f"VAULTAI_AUTO_APPROVE_TYPES cannot include {', '.join(sorted(legal))}; legal documents always need a human"
+        )
     if s.date_order not in {"MDY", "DMY"}:
         raise ConfigError("VAULTAI_DATE_ORDER must be MDY or DMY")
     if s.ocr_engine not in {"auto", "tesseract", "none"}:

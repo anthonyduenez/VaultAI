@@ -28,7 +28,6 @@ DESKTOP_CSP = (
 )
 PHONE_API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-VITE_DEV_HOSTS = ("localhost:5173", "127.0.0.1:5173")
 
 _HTTP_ERRORS: dict[int, tuple[str, str]] = {
     400: ("bad_request", "The request could not be read."),
@@ -44,7 +43,7 @@ def api_error(status: int, code: str, message: str, headers: dict[str, str] | No
 
 def desktop_hosts(settings: Settings) -> frozenset[str]:
     return frozenset(
-        {f"127.0.0.1:{settings.port}", f"localhost:{settings.port}", f"{settings.host}:{settings.port}", *VITE_DEV_HOSTS}
+        {f"127.0.0.1:{settings.port}", f"localhost:{settings.port}", f"{settings.host}:{settings.port}"}
     )
 
 

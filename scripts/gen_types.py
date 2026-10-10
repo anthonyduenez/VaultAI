@@ -30,8 +30,10 @@ OUT = ROOT / "frontend" / "src" / "api" / "types.ts"
 # Request bodies: fields with defaults are optional for the caller.
 REQUEST_MODELS = {
     "ProcessRequest", "FieldEdit", "ReviewRequest", "BatchReviewRequest", "ObligationUpdate",
-    "ExportFilters", "ScanRequest", "PageEdit", "AssembleRequest", "DeleteAllRequest",
+    "ExportFilters", "ScanRequest", "PageEdit", "AssembleRequest", "DeleteAllRequest", "NewScanSession",
 }
+# Status rules the UI must follow; emitted so the frontend never hand-copies them.
+STATUS_SETS = ("REVIEWABLE", "EXPORTABLE", "EDITABLE", "REPROCESSABLE")
 
 
 def ts_type(tp: object) -> str:
@@ -90,6 +92,15 @@ def render() -> str:
     out.append("};")
     out.append("")
     out.append("export const LEGAL_DOC_TYPES: DocType[] = [" + ", ".join(f'"{t.value}"' for t in sorted(domain.LEGAL_DOC_TYPES)) + "];")
+    out.append("")
+    for name in STATUS_SETS:
+        values = sorted(getattr(domain, name))
+        out.append(f"export const {name}: DocStatus[] = [" + ", ".join(f'"{v.value}"' for v in values) + "];")
+    out.append("")
+    out.append("export const REVIEW_ACTION_FROM: Record<ReviewAction, DocStatus[]> = {")
+    for action, sources in domain.REVIEW_ACTION_FROM.items():
+        out.append(f"  {action.value}: [" + ", ".join(f'"{v.value}"' for v in sorted(sources)) + "],")
+    out.append("};")
     out.append("")
 
     models = list(dict.fromkeys(
