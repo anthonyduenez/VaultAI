@@ -156,6 +156,9 @@ def is_local_host(host: str) -> bool:
         ip = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
         return False
+    # 0.0.0.0 and :: count as "private" to ipaddress but mean every interface.
+    if ip.is_unspecified:
+        return False
     return ip.is_loopback or ip.is_private or ip.is_link_local
 
 
