@@ -27,7 +27,6 @@ class FieldSpec:
     label: str
     value_type: ValueType
     required: bool = False
-    # Printed labels that introduce this value ("Invoice No.", "Inv #"). Lowercase, matched case-insensitively.
     aliases: tuple[str, ...] = ()
     options: tuple[str, ...] = ()
 
@@ -36,7 +35,6 @@ class FieldSpec:
 class DocSchema:
     doc_type: DocType
     fields: tuple[FieldSpec, ...]
-    # Field keys projected onto the document row for filtering, sorting, and export.
     counterparty: str | None = None
     doc_date: str | None = None
     total: str | None = None
@@ -246,7 +244,6 @@ SCHEMAS: dict[DocType, DocSchema] = {
     ),
 }
 
-# Generic key-value pairs found on any document are stored as extra fields with this key prefix.
 KV_PREFIX = "kv:"
 
 def _enum_options() -> dict[str, tuple[str, ...]]:
@@ -258,7 +255,6 @@ def _enum_options() -> dict[str, tuple[str, ...]]:
     return out
 
 
-# Enum fields share their options across document types (currency, signature status).
 ENUM_OPTIONS: dict[str, tuple[str, ...]] = _enum_options()
 
 

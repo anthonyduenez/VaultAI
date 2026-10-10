@@ -28,7 +28,6 @@ class RedactingFilter(logging.Filter):
             record.args = {k: _clip(v) for k, v in record.args.items()}
         if isinstance(record.msg, str) and len(record.msg) > MAX_MESSAGE_CHARS:
             record.msg = record.msg[:MAX_MESSAGE_CHARS] + "…"
-        # Tracebacks can quote document text through exception messages; keep only the class.
         if record.exc_info and record.exc_info[0] is not None:
             record.msg = f"{record.msg} [{record.exc_info[0].__name__}]"
             record.exc_info = None

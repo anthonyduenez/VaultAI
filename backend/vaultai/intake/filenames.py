@@ -7,14 +7,12 @@ import unicodedata
 MAX_DISPLAY_CHARS = 120
 FALLBACK_NAME = "untitled"
 
-# Normalize client spellings onto the extensions Storage accepts.
 EXTENSION_ALIASES = {"jpeg": "jpg", "jpg": "jpg", "tif": "tiff", "tiff": "tiff", "pdf": "pdf", "png": "png", "txt": "txt"}
 
 
 def display_name(raw: str) -> str:
     base = raw.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
     base = unicodedata.normalize("NFC", base)
-    # Cc = control, Cf = format (bidi overrides, zero-width), Cs/Co/Cn = surrogates, private, unassigned.
     base = "".join(ch for ch in base if unicodedata.category(ch) not in {"Cc", "Cf", "Cs", "Co", "Cn"})
     base = " ".join(base.split()).strip(" .")
     if not base or set(base) <= {"."}:

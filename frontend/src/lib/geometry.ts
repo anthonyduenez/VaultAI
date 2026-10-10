@@ -8,7 +8,6 @@ interface BoxStyle {
 }
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
-// Rounding hides float noise such as 0.4 * 100 = 40.00000000000001.
 const pct = (v: number) => `${Number((v * 100).toFixed(3))}%`;
 
 /** Normalized (x0, y0, x1, y1) box, origin top-left, → absolute-position percentages. */

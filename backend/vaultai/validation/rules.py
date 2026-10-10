@@ -63,7 +63,6 @@ class Snapshot:
     ocr_confidence: Mapping[int, float | None]
     clauses: tuple[ClauseRec, ...]
     peers: tuple[Peer, ...]
-    # Totals of approved documents from the same counterparty, oldest first.
     history: tuple[Decimal, ...]
     review_threshold: float
     unusual_amount: Decimal
@@ -98,9 +97,6 @@ Rule = Callable[[Snapshot], Iterable[Issue]]
 
 def _fmt(v: Decimal | None) -> str:
     return f"{v:,.2f}" if v is not None else "?"
-
-
-# ---------------------------------------------------------------- readability and completeness
 
 
 def unreadable(s: Snapshot) -> Iterable[Issue]:
@@ -153,9 +149,6 @@ def date_order(s: Snapshot) -> Iterable[Issue]:
                     second, s.ev(second))
 
 
-# ---------------------------------------------------------------- amounts
-
-
 def line_item_sum(s: Snapshot) -> Iterable[Issue]:
     amounts = [i.amount for i in s.items if i.amount is not None]
     if s.money("subtotal") is not None:
@@ -176,7 +169,6 @@ def line_item_sum(s: Snapshot) -> Iterable[Issue]:
 
 def totals(s: Snapshot) -> Iterable[Issue]:
     subtotal, total, tax = s.money("subtotal"), s.money("total"), s.money("tax")
-    # A tax line that was not read is unknown, not zero: without it the arithmetic cannot be checked.
     if subtotal is None or total is None or (tax is None and total != subtotal):
         return
     discount, tax = s.money("discount") or Decimal(0), tax or Decimal(0)
@@ -227,7 +219,6 @@ def unusual_amount(s: Snapshot) -> Iterable[Issue]:
     amount = s.money(key) if key else None
     if amount is None:
         return
-    # A fixed ceiling suits petty-cash style documents; invoices and orders are judged against their own history.
     if s.doc_type in (D.CHECK, D.RECEIPT) and amount > s.unusual_amount:
         yield Issue(IssueCode.UNUSUAL_AMOUNT, f"Amount {_fmt(amount)} is above the review limit of {_fmt(s.unusual_amount)}.",
                     key, s.ev(key))
@@ -238,9 +229,6 @@ def unusual_amount(s: Snapshot) -> Iterable[Issue]:
             yield Issue(IssueCode.UNUSUAL_AMOUNT,
                         f"Amount {_fmt(amount)} is more than {UNUSUAL_MULTIPLE}x the usual {_fmt(median)} for this counterparty.",
                         key, s.ev(key))
-
-
-# ---------------------------------------------------------------- identifiers and duplicates
 
 
 def micr_matches(s: Snapshot) -> Iterable[Issue]:
@@ -284,9 +272,6 @@ def duplicates(s: Snapshot) -> Iterable[Issue]:
             return
 
 
-# ---------------------------------------------------------------- signatures, legal, injection
-
-
 def signatures(s: Snapshot) -> Iterable[Issue]:
     status, present = s.value("signature_status"), s.value("signature_present")
     if status in {"unsigned", "partially_signed"}:
@@ -302,7 +287,6 @@ def legal_disclaimer(s: Snapshot) -> Iterable[Issue]:
 
 
 def _phrase_evidence(s: Snapshot, phrase: str, fallback: Evidence | None) -> Evidence | None:
-    """The line holding the phrase, or the line where it starts when it wraps onto the next line."""
     for probe in (phrase.lower(), " ".join(phrase.lower().split()[:3])):
         line = next((ln for ln in s.doc.visible if probe in ln.text.lower()), None)
         if line:

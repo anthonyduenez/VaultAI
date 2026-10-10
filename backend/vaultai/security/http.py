@@ -62,8 +62,6 @@ def security_headers(csp: str, *, no_store: bool) -> list[tuple[bytes, bytes]]:
 
 
 def _with_headers(send: Send, extra: list[tuple[bytes, bytes]]) -> Send:
-    """Add headers the route did not set itself (a route may send its own CSP, e.g. a nonce)."""
-
     async def wrapped(message: Message) -> None:
         if message["type"] == "http.response.start":
             current = list(message.get("headers", []))
@@ -97,8 +95,6 @@ Rejection = Callable[[Scope], JSONResponse | None]
 
 
 class Guard:
-    """Pure ASGI middleware: reject early, add security headers, and turn crashes into a bare ApiError."""
-
     def __init__(self, app: ASGIApp, *, reject: Rejection, csp: str, no_store: Callable[[str], bool]) -> None:
         self.app = app
         self.reject = reject

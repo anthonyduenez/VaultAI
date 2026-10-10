@@ -15,7 +15,6 @@ interface LineItemsProps {
 function sumAmounts(items: readonly LineItem[]): string | null {
   const amounts = items.map((item) => item.amount).filter((a): a is string => a !== null);
   if (amounts.length === 0) return null;
-  // Summed in integer cents so the comparison with the document total is exact.
   const cents = amounts.reduce((acc, a) => acc + Math.round(Number(a) * 100), 0);
   return (cents / 100).toFixed(2);
 }

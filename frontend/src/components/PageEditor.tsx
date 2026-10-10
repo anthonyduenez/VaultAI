@@ -34,11 +34,9 @@ interface RotatedPageProps {
   alt: string;
 }
 
-/** Shows the page as it will be assembled: rotated, with the area outside the crop shaded. */
 function RotatedPage({ src, size, rotation, crop, alt }: RotatedPageProps) {
   const sideways = rotation === 90 || rotation === 270;
   const aspect = sideways ? `${size.height} / ${size.width}` : `${size.width} / ${size.height}`;
-  // A sideways image must be as wide as the frame is tall once it is turned.
   const width = sideways ? `${(size.width / size.height) * 100}%` : "100%";
   return (
     <div className="rotated" style={{ aspectRatio: aspect }}>

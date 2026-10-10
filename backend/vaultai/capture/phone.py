@@ -148,7 +148,6 @@ def parse_edits(raw: str | None, count: int) -> list[PhonePageEdit]:
 
 
 def decode_photo(data: bytes, settings: Settings) -> Image.Image:
-    """Pixels only: orientation is applied, and EXIF (including GPS) is dropped when the page is re-encoded."""
     if not data.startswith(IMAGE_MAGIC):
         raise Problem(422, "invalid_image", "Pages must be JPEG or PNG photos.")
     image = ImageOps.exif_transpose(open_image(data, settings.max_image_pixels, ("JPEG", "PNG")))

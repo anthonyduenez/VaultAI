@@ -73,8 +73,6 @@ class Settings:
     egress_guard: bool = True
 
     def __post_init__(self) -> None:
-        # Validate however Settings is built, not only via load_settings, so no caller can
-        # configure a public model endpoint or auto-approve legal documents.
         _check(self)
 
     @property
@@ -128,7 +126,6 @@ _BY_TYPE = {
     "Path": _path, "str": str, "str | None": str, "int": int, "float": float, "bool": _bool,
     "Decimal": Decimal, "ModelKind": ModelKind, "frozenset[DocType]": _doc_types,
 }
-# Every Settings field is settable as VAULTAI_<NAME>; its annotation picks the parser.
 _PARSERS = {f.name: _BY_TYPE[f.type] for f in fields(Settings)}
 
 
@@ -188,7 +185,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
 
 
 def _check(s: Settings) -> None:
-    """Privacy and safety invariants. Runs on every Settings, however it was built."""
     if s.model_backend is ModelKind.OPENAI_COMPAT:
         host = urlparse(s.model_endpoint).hostname or ""
         if not is_local_host(host):
@@ -212,7 +208,6 @@ _CHOICES = {
 
 
 def _check_choices(s: Settings) -> None:
-    """Operator input from the environment; tests may construct other engines directly."""
     for name, allowed in _CHOICES.items():
         if getattr(s, name) not in allowed:
             raise ConfigError(f"VAULTAI_{name.upper()} must be one of {', '.join(allowed)}")

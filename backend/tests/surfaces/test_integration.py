@@ -1,5 +1,3 @@
-"""End-to-end through the real core pipeline."""
-
 from __future__ import annotations
 
 import io
@@ -108,7 +106,7 @@ def test_phone_submission_enters_intake_as_phone(tmp_path: Path) -> None:
                         phone_enabled=True, phone_host="192.168.1.10")
     desktop = TestClient(create_app(settings), base_url=BASE_URL, headers=CSRF)
     pairing = desktop.post("/api/phone/sessions").json()
-    session_id, token = re.search(r"/m/([\w-]+)#([\w-]+)", pairing["url"]).groups()  # type: ignore[union-attr]
+    session_id, token = re.search(r"/m/([\w-]+)#([\w-]+)", pairing["url"]).groups()
     buf = io.BytesIO()
     Image.new("RGB", (850, 1100), "white").save(buf, "JPEG")
     lan = TestClient(create_phone_app(desktop.app.state.ctx), base_url="http://192.168.1.10:8766",

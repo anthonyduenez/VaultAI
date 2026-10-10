@@ -35,7 +35,6 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("tool_call", re.compile(r"\b(?:call|invoke|execute) (?:the )?(?:tool|function|command)\b", _I)),
 )
 
-# Model output that names a command, a path, or a link is never acted on; it is kept only as inert, flagged text.
 UNSAFE_VALUE = re.compile(r"\brm\s+-rf\b|\bcurl\b|\bwget\b|\.\./|/etc/|https?://|ftp://|<script\b|\bsudo\b", _I)
 
 

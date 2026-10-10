@@ -58,7 +58,6 @@ function positiveInt(raw: string | null): number | null {
   return raw !== null && Number.isInteger(n) && n > 0 ? n : null;
 }
 
-/** The URL is the source of truth for the explorer, so filters survive reloads and back/forward. */
 function parseFilters(params: URLSearchParams): Filters {
   const conf = Number(params.get("minconf"));
   return {
@@ -125,7 +124,6 @@ export function DocumentsPage() {
     setParams(writeFilters({ ...filters, page: 1, ...patch }), { replace: true });
 
   useEffect(() => {
-    // Only a settled search term is pushed to the URL; other filter changes must not re-trigger this.
     if (debouncedQ !== filters.q) update({ q: debouncedQ });
   }, [debouncedQ]);
 

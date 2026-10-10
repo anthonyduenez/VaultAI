@@ -12,7 +12,6 @@ interface ValueSpec {
   display: (value: string, field: ExtractedField) => string;
 }
 
-// Values are sent as typed; the server normalizes them and answers 422 with the message to show.
 const VALUE_SPEC: Record<ValueType, ValueSpec> = {
   text: { input: "text", display: (v) => v },
   long_text: { input: "textarea", display: (v) => v },

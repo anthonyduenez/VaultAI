@@ -19,11 +19,8 @@ import warnings
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Minimum luminance spread (0..255) inside a text box for the text to count as visible ink.
 MIN_CONTRAST = 40
-# Text shorter than this fraction of the page height is unreadable to a person.
 MIN_TEXT_HEIGHT = 0.004
-# Embedded images larger than this fraction of the page are scans or backgrounds, not signatures.
 MAX_MARK_IMAGE_AREA = 0.25
 
 
@@ -43,9 +40,6 @@ def _pil(max_pixels: int):
     Image.MAX_IMAGE_PIXELS = max_pixels
     warnings.simplefilter("error", Image.DecompressionBombWarning)
     return Image
-
-
-# ---------------------------------------------------------------- probe
 
 
 def probe_pdf(req: dict) -> dict:
@@ -71,9 +65,6 @@ def probe_image(req: dict) -> dict:
     return {"ok": True, "pages": frames, "too_large": False}
 
 
-# ---------------------------------------------------------------- parse
-
-
 def _save_png(img, out_dir: str, page_no: int) -> tuple[str, str]:
     buf = io.BytesIO()
     img.save(buf, format="PNG", compress_level=6)
@@ -92,7 +83,6 @@ def _scale(width: float, height: float, dpi: int, max_pixels: int) -> float:
 
 
 def _displayed(box: tuple[float, float, float, float], rotation: int) -> tuple[float, float, float, float]:
-    """Map a normalized box from unrotated page space into the frame pdfium renders (with /Rotate applied, clockwise)."""
     u0, v0, u1, v1 = box
     if rotation == 90:
         return (1 - v1, u0, 1 - v0, u1)
@@ -110,7 +100,6 @@ def _normalized(left: float, bottom: float, right: float, top: float, size: tupl
 
 
 def _marks(page, size: tuple[float, float], rotation: int) -> list[tuple[float, float, float, float]]:
-    """Normalized boxes of hand-drawn curves and small embedded images (how signatures appear in a PDF)."""
     import pypdfium2.raw as raw
 
     out = []
@@ -235,7 +224,7 @@ def main() -> int:
     sys.path.insert(0, BACKEND_DIR)
     try:
         out = HANDLERS[(req["mode"], req["kind"])](req)
-    except Exception as exc:  # noqa: BLE001 - every parser failure becomes a clean, content-free error
+    except Exception as exc:
         out = {"ok": False, "error": type(exc).__name__}
     sys.stdout.write(json.dumps(out))
     return 0

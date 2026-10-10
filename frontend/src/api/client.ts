@@ -112,8 +112,6 @@ async function send({ method = "GET", query, body, signal }: RequestOptions, pat
   return response;
 }
 
-// Response shapes are generated from the backend's pydantic models, which also validate on the
-// way out, so the JSON is trusted to match T here and nowhere else.
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const response = await send(options, path);
   return (await response.json()) as T;

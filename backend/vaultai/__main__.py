@@ -27,7 +27,6 @@ def serve() -> None:
     settings = load_settings()
     uvicorn.run(
         create_app(settings), host=settings.host, port=settings.port, log_level="info",
-        # Access logs would record search queries and document ids; the audit log covers every change.
         access_log=False, proxy_headers=False, server_header=False,
     )
 

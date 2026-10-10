@@ -8,7 +8,6 @@ from decimal import Decimal
 from vaultai.domain import Evidence, FieldOrigin
 from vaultai.parsing.layout import Line, page_of
 
-# Confidence by how a value was located (scaled by OCR line confidence on scanned pages).
 SAME_LINE = 0.95
 NEXT_LINE = 0.85
 PATTERN = 0.8
@@ -17,8 +16,6 @@ PATTERN = 0.8
 @dataclass(frozen=True)
 class Found:
     key: str
-    # Canonical string: Decimal for money, ISO for dates, "true"/"false", printed text otherwise.
-    # None with raw_text set means the printed value could not be read (e.g. 02/30/2026).
     value: str | None
     raw_text: str | None
     confidence: float

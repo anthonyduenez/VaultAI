@@ -62,9 +62,6 @@ def plain(v: Decimal) -> str:
     return f"{v:.2f}"
 
 
-# ---------------------------------------------------------------- ground truth
-
-
 @dataclass(frozen=True)
 class Item:
     description: str
@@ -162,9 +159,6 @@ def sample(path: str, note: str) -> Callable[[Callable[[], Built]], Callable[[],
     return register
 
 
-# ---------------------------------------------------------------- layout primitives
-
-
 def kv(p: Page, x_label: float, x_value: float, y: float, label: str, value: str, size: float = 9.5) -> None:
     p.text(x_label, y, label, size - 0.5, "F2")
     p.text(x_value, y, value, size)
@@ -174,7 +168,6 @@ Col = tuple[str, float, str]
 
 
 def table(p: Page, y: float, x0: float, x1: float, cols: Sequence[Col], rows: Sequence[Sequence[str]], size: float = 9) -> float:
-    """Shaded header, one ruled row per entry; each col is (header, anchor x, "l" or "r" alignment)."""
     p.rect(x0, y, x1 - x0, 20, stroke=None, fill=SHADE)
     p.line(x0, y, x1, y, 0.8)
     for head, ax, align in cols:
@@ -197,8 +190,6 @@ def page_footers(doc: PdfDoc) -> None:
 
 
 class Flow:
-    """Top-to-bottom text layout that starts a new page when the current one is full."""
-
     def __init__(self, doc: PdfDoc, y: float = 72, x: float = 72, width: float = 468, top: float = 72, bottom: float = 724):
         self.doc, self.x, self.width, self.top, self.bottom = doc, x, width, top, bottom
         self.page = doc.pages[-1] if doc.pages else doc.page()
@@ -234,7 +225,6 @@ class Flow:
 def sign_block(
     p: Page, x: float, y: float, org: str, name: str | None, title: str | None, signed_on: date | None
 ) -> None:
-    """A signature block; a signature stroke is drawn only when signed_on is given."""
     p.text(x, y, org, 10, "F2")
     y += 34
     if signed_on:
@@ -260,9 +250,6 @@ def letterhead(p: Page, name: str, address: str, contact: str, title: str = "") 
     if title:
         p.text_right(558, 62, title, 22, "F2", ACCENT)
     p.line(54, 106, 558, 106, 1.5, ACCENT)
-
-
-# ---------------------------------------------------------------- billing documents
 
 
 def billing_doc(
@@ -401,9 +388,6 @@ def remit(vendor: str) -> str:
     return f"Please make checks payable to {vendor} or pay by ACH using the remittance details on file. Thank you for your business."
 
 
-# ---------------------------------------------------------------- checks
-
-
 @dataclass(frozen=True)
 class Check:
     number: str
@@ -459,9 +443,6 @@ def check_sample(c: Check) -> Built:
         "signature_present": "true",
     }
     return doc.to_bytes(), expected(DocType.CHECK, fields, "ready")
-
-
-# ---------------------------------------------------------------- receipts
 
 
 def receipt_pdf(
@@ -526,9 +507,6 @@ def receipt_pdf(
         p.rect(x, y, bar, 34, stroke=None, fill=BLACK)
         x += bar + 1.1
     return doc.to_bytes()
-
-
-# ---------------------------------------------------------------- demo folder
 
 
 @sample("demo/check_4521_northwind.pdf", "Signed business check with written amount, memo, and MICR line.")
@@ -1157,9 +1135,6 @@ def _form() -> Built:
     return doc.to_bytes(), expected(DocType.ADMIN_FORM, fields, "ready")
 
 
-# ---------------------------------------------------------------- scanner feed
-
-
 @sample("scanner/receipt_harbor_fuel.pdf", "Narrow fuel receipt (no tax) for the mock scanner; auto-approved.")
 def _receipt_harbor_fuel() -> Built:
     lines = items(("Unleaded 87 - Pump 4", "10.000", "4.84"), ("Car wash - Basic", "1", "11.00"), ("Tire air", "1", "2.00"))
@@ -1239,9 +1214,6 @@ def _invoice_tidewater() -> Built:
     return inv.doc().to_bytes(), expected(DocType.INVOICE, inv.fields(), "ready", lines=inv.lines)
 
 
-# ---------------------------------------------------------------- adversarial preflight inputs
-
-
 @sample("adversarial/not_really_a.pdf", "Windows PE executable renamed to .pdf; content sniffing must reject it.")
 def _pe_as_pdf() -> Built:
     dos = struct.pack("<2s13H", b"MZ", 0x90, 3, 0, 4, 0, 0xFFFF, 0, 0xB8, 0, 0, 0, 0x40, 0)
@@ -1303,9 +1275,6 @@ def _docx() -> Built:
 def _acme_copy() -> Built:
     data, _ = _invoice_acme()
     return data, preflight("duplicate", "Same sha256 as demo/invoice_acme_INV-2026-0142.pdf.")
-
-
-# ---------------------------------------------------------------- output
 
 
 def readme() -> str:

@@ -49,12 +49,11 @@ def _rejected(ctx: AppContext, batch_id: str, name: str, source: Source, size: i
 
 
 def _store(ctx: AppContext, staged: Path, stored: str, data: bytes) -> Path:
-    """Move the probed file into raw storage. A hard link never replaces an existing file."""
     path = ctx.storage.resolve(ctx.storage.raw, stored)
     try:
         os.link(staged, path)
     except OSError:
-        # Filesystems without hard links (exFAT, some network shares) get a fresh write; O_EXCL never overwrites either.
+        # Filesystems without hard links (exFAT, some network shares) get a fresh write.
         return ctx.storage.write_new(ctx.storage.raw, stored, data)
     return path
 
@@ -94,7 +93,6 @@ def ingest_bytes(ctx: AppContext, *, filename: str, data: bytes, source: Source,
                      after=DocStatus.IMPORTED.value, note=source.value)
             item = repo.get_intake(conn, intake_id)
     except sqlite3.IntegrityError:
-        # A concurrent upload of the same bytes won the UNIQUE(sha256) race.
         path.unlink(missing_ok=True)
         with ctx.db() as conn:
             existing = conn.execute("SELECT id FROM documents WHERE sha256 = ?", (sha,)).fetchone()
@@ -106,8 +104,6 @@ def ingest_bytes(ctx: AppContext, *, filename: str, data: bytes, source: Source,
 
 
 def _read_sample(path: Path, limit: int) -> bytes:
-    # O_NOFOLLOW closes the gap between the symlink check and the open; one byte past the
-    # limit lets preflight reject an oversized sample instead of importing a truncated one.
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     with os.fdopen(fd, "rb") as fh:
         return fh.read(limit + 1)

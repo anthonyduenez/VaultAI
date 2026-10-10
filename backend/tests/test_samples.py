@@ -1,5 +1,3 @@
-"""The committed samples are reproducible and say what samples/expected.json claims."""
-
 from __future__ import annotations
 
 import json

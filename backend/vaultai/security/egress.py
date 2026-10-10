@@ -45,7 +45,7 @@ def install_egress_guard() -> None:
             _check(self.family, address)
             return original_connect_ex(self, address)
 
-        socket.socket.connect = connect  # type: ignore[method-assign]
-        socket.socket.connect_ex = connect_ex  # type: ignore[method-assign]
+        socket.socket.connect = connect
+        socket.socket.connect_ex = connect_ex
         _installed = True
 

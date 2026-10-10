@@ -71,9 +71,6 @@ OCR_WORKERS = 4
 MODEL_UNAVAILABLE = "The local model could not be reached; rules-only results were kept for review."
 
 
-# ---------------------------------------------------------------- requesting work
-
-
 def request_processing(ctx: AppContext, doc_ids: list[str], *, actor: str, reprocess: bool = False) -> list[str]:
     allowed = REPROCESSABLE if reprocess else frozenset({DocStatus.IMPORTED, DocStatus.FAILED})
     action = AuditAction.REPROCESS if reprocess else AuditAction.PROCESS
@@ -93,13 +90,8 @@ def request_processing(ctx: AppContext, doc_ids: list[str], *, actor: str, repro
     return queued
 
 
-# ---------------------------------------------------------------- one document
-
-
 @dataclass
 class Run:
-    """What one processing run learned; persisted in a single transaction at the end."""
-
     pages: list[Page] = field(default_factory=list)
     page_count: int = 0
     image_dir: Path | None = None
@@ -116,12 +108,9 @@ class Run:
 
 
 class _Model:
-    """Model calls for one run: cached, grounded by the caller, and stopped after the first transport failure."""
-
     def __init__(self, ctx: AppContext, run: Run, use_cache: bool) -> None:
         self.ctx = ctx
         self.run = run
-        # The mock is deterministic and instant, so only a real model's answers are cached.
         self.llm = ctx.model.kind is not ModelKind.MOCK
         self.use_cache = use_cache
 
@@ -188,7 +177,6 @@ def _read_pages(ctx: AppContext, doc_id: str, row: sqlite3.Row, run: Run, model:
             texts, issues = grounding.ground_transcribe(raw) if raw is not None else ([], [])
             run.issues.extend(issues)
             run.route = Route.VISION
-            # Transcribed text is model output: it carries the model confidence cap, and the vision route never auto-approves.
             lines = [Line(f"p{page.page_no}.l{n}", t, None, grounding.MODEL_CONFIDENCE_CAP, text_spans(t))
                      for n, t in enumerate(texts, start=1)]
             page = replace(page, text_method=TextMethod.VISION.value if lines else TextMethod.NONE.value, lines=())
@@ -206,7 +194,6 @@ def _renumber(page_no: int, lines: list[Line]) -> tuple[Line, ...]:
 
 def _ocr_pages(ctx: AppContext, doc_id: str, engine: ocr.OcrEngine, pages: list[Page],
                image_dir: Path) -> dict[int, list[Word]]:
-    """Words by page number. Each page is its own single-threaded Tesseract process, so a few run side by side."""
     words: dict[int, list[Word]] = {}
     _stage(ctx, doc_id, f"OCR 0/{len(pages)}")
     pool = ThreadPoolExecutor(max_workers=min(OCR_WORKERS, len(pages)))
@@ -221,7 +208,6 @@ def _ocr_pages(ctx: AppContext, doc_id: str, engine: ocr.OcrEngine, pages: list[
 
 
 def _ocr_words(ctx: AppContext, engine: ocr.OcrEngine, page: Page, png: Path) -> list[Word]:
-    """Runs on a pool thread: every cache access opens its own connection."""
     key = cache.key("ocr", page.image_sha256 or "", engine.name)
     with ctx.db() as conn:
         hit = cache.get(conn, key)
@@ -234,7 +220,6 @@ def _ocr_words(ctx: AppContext, engine: ocr.OcrEngine, page: Page, png: Path) ->
 
 
 def _model_lines(doc: Doc) -> tuple[DocLine, ...]:
-    """Quarantined lines (hidden or carrying instructions) never reach a model."""
     return tuple(DocLine(ln.id, ln.text) for ln in doc.visible)
 
 
@@ -336,9 +321,6 @@ def _work(ctx: AppContext, doc_id: str, row: sqlite3.Row, run: Run) -> None:
     _stage(ctx, doc_id, "Validating")
 
 
-# ---------------------------------------------------------------- persistence
-
-
 def _field_row(doc_id: str, key: str, label: str, value_type: ValueType, required: bool, f: Found | None,
                extracted_at: str) -> tuple:
     page, bbox, line_id, ev_text = db.evidence_columns(f.evidence if f else None)
@@ -362,7 +344,7 @@ def _write_records(conn: sqlite3.Connection, doc_id: str, run: Run) -> None:
         "SELECT kind, description, status FROM obligations WHERE doc_id = ? AND status != ?",
         (doc_id, ObligationStatus.OPEN.value))}
     for table in ("pages", "fields", "line_items", "clauses", "obligations", "issues"):
-        conn.execute(f"DELETE FROM {table} WHERE doc_id = ?", (doc_id,))  # noqa: S608 - fixed table names
+        conn.execute(f"DELETE FROM {table} WHERE doc_id = ?", (doc_id,))
 
     for p in run.pages:
         conn.execute(
@@ -428,9 +410,6 @@ def _move_images(ctx: AppContext, doc_id: str, run: Run) -> None:
         run.image_dir = None
 
 
-# ---------------------------------------------------------------- validation snapshot (shared with revalidate)
-
-
 def _snapshot(ctx: AppContext, conn: sqlite3.Connection, doc_id: str, doc_type: DocType) -> Snapshot:
     fields = {
         f.key: FieldView(
@@ -489,7 +468,7 @@ def revalidate(ctx: AppContext, conn: sqlite3.Connection,
         return None
     doc_type = DocType(row["doc_type"])
     snap = _snapshot(ctx, conn, doc_id, doc_type)
-    conn.execute(f"DELETE FROM issues WHERE doc_id = ? AND code NOT IN ({','.join('?' * len(PROCESS_CODES))})",  # noqa: S608
+    conn.execute(f"DELETE FROM issues WHERE doc_id = ? AND code NOT IN ({','.join('?' * len(PROCESS_CODES))})",
                  (doc_id, *(c.value for c in PROCESS_CODES)))
     _insert_issues(conn, doc_id, validate(snap))
 
@@ -511,8 +490,6 @@ def revalidate(ctx: AppContext, conn: sqlite3.Connection,
     conn.execute("INSERT INTO doc_fts (doc_id, filename, body) VALUES (?, ?, ?)", (doc_id, row["filename"], body))
     return snap, issues
 
-
-# ---------------------------------------------------------------- routing
 
 TRUSTED_ORIGINS = frozenset({FieldOrigin.RULES, FieldOrigin.HUMAN})
 
@@ -553,7 +530,6 @@ def _finish(ctx: AppContext, conn: sqlite3.Connection, doc_id: str, run: Run, ms
     required = [f for f in snap.fields.values() if f.required]
     final, rule = decide(c.doc_type, run.route, issues, required, s.auto_approve_types, s.auto_approve_min_confidence,
                          s.review_confidence_threshold)
-    # The history shows processing -> outcome; extracted and validated only exist inside this transaction.
     db.audit(conn, AuditAction.PROCESS, ACTOR, doc_id=doc_id, before=DocStatus.PROCESSING.value, after=final.value,
              note=f"route={run.route.value} pages={run.page_count}")
     now = db.now()
@@ -568,7 +544,6 @@ def _finish(ctx: AppContext, conn: sqlite3.Connection, doc_id: str, run: Run, ms
 
 
 def _fail(ctx: AppContext, doc_id: str, exc: Exception) -> None:
-    """A failure inside the final transaction rolls back to processing, so this only ever moves processing -> failed."""
     reason = f" ({exc.reason})" if isinstance(exc, isolate.ParseFailed) else ""
     message = f"{type(exc).__name__}{reason}: the document could not be processed."
     with ctx.db() as conn, db.transaction(conn):
@@ -597,7 +572,7 @@ def process_document(ctx: AppContext, doc_id: str) -> None:
             _write_records(conn, doc_id, run)
             final = _finish(ctx, conn, doc_id, run, ms)
         log.info("processed doc=%s pages=%d ms=%d status=%s route=%s", doc_id, run.page_count, ms, final.value, run.route.value)
-    except Exception as exc:  # noqa: BLE001 - any failure is recorded on the document, never raised into the worker
+    except Exception as exc:
         log.warning("processing failed doc=%s error=%s", doc_id, type(exc).__name__)
         _fail(ctx, doc_id, exc)
     finally:

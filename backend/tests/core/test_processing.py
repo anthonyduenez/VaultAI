@@ -95,8 +95,6 @@ def test_scanned_pages_are_read_side_by_side_and_kept_in_page_order(settings, mo
     last_page_read = threading.Event()
 
     class OutOfOrderOcr:
-        """Reads each page's pixel width back as text. The first page answers only after the last one has."""
-
         name = "out-of-order 1.0"
 
         def read(self, png: bytes) -> list[Word]:
@@ -148,7 +146,7 @@ def test_user_hint_decides_the_type(mock_ctx):
 
 def _counts(ctx, doc_id: str) -> dict[str, int]:
     with ctx.db() as conn:
-        return {t: conn.execute(f"SELECT COUNT(*) FROM {t} WHERE doc_id = ?", (doc_id,)).fetchone()[0]  # noqa: S608
+        return {t: conn.execute(f"SELECT COUNT(*) FROM {t} WHERE doc_id = ?", (doc_id,)).fetchone()[0]
                 for t in ("pages", "fields", "line_items", "issues", "clauses", "obligations", "doc_fts")}
 
 

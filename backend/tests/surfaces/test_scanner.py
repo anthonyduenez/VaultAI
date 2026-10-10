@@ -24,7 +24,7 @@ from vaultai.repo import Problem
 def pdf_page_sizes(data: bytes) -> list[tuple[int, int]]:
     pdf = pdfium.PdfDocument(data)
     try:
-        return [tuple(round(v) for v in pdf[i].get_size()) for i in range(len(pdf))]  # type: ignore[misc]
+        return [tuple(round(v) for v in pdf[i].get_size()) for i in range(len(pdf))]
     finally:
         pdf.close()
 

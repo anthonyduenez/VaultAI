@@ -1,5 +1,3 @@
-"""Each validation rule observed through the real pipeline on a generated document."""
-
 from __future__ import annotations
 
 from core.conftest import check_pdf, contract_pdf, doc, field, invoice_pdf, issue_codes, run

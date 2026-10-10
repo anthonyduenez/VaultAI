@@ -4,7 +4,6 @@ import { type ApiFailure, toFailure } from "./client";
 export type ResourceState<T> =
   | { kind: "loading" }
   | { kind: "ready"; data: T }
-  // A failed refresh keeps the last good data so polling views do not blank out.
   | { kind: "error"; error: ApiFailure; data: T | null };
 
 export interface Resource<T> {
@@ -36,7 +35,6 @@ export function useResource<T>(
   const loadRef = useRef(load);
   const pollRef = useRef(options.poll);
   const dataRef = useRef<T | null>(null);
-  // JSON of the data in the current "ready" state; null while loading or after a failed refresh.
   const readyJson = useRef<string | null>(null);
 
   useEffect(() => {
@@ -47,8 +45,6 @@ export function useResource<T>(
   useEffect(() => {
     const controller = new AbortController();
     let timer: number | undefined;
-    // A poll re-runs the load here instead of through state and sets state only when the data
-    // changed, so an unchanged poll does not re-render the tables below.
     const schedule = (data: T | null) => {
       const ms = pollRef.current?.(data) ?? null;
       if (ms !== null) timer = window.setTimeout(run, ms);

@@ -25,7 +25,6 @@ Row = tuple[tuple[float, str] | tuple[float, str, float], ...]
 
 def pdf(rows: list[str | Row], *, size: tuple[float, float] = (612, 792), top: float = 72, step: float = 18,
         signatures: tuple[tuple[float, float], ...] = (), white: tuple[tuple[float, float, str], ...] = ()) -> bytes:
-    """A one-page text PDF: each row is a string at x=72 or a tuple of (x, text[, size]) cells on one baseline."""
     doc = PdfDoc()
     page = doc.page(size)
     y = top
@@ -94,7 +93,6 @@ def check_pdf(*, number: str = "1043", amount: str = "$1,250.00",
         ((420, "AUTHORIZED SIGNATURE"),),
         ((120, micr),),
     ]
-    # Rows sit at y = 40 + 26 * index; the stroke is drawn just above the signature label (row 5).
     return pdf(rows, size=(612, 260), top=40, step=26, signatures=((420, 160),) if signed else ())
 
 
@@ -129,8 +127,6 @@ def png_bytes(size: tuple[int, int] = (200, 100), fmt: str = "PNG", frames: int 
 
 
 class FakeOcr:
-    """Stands in for Tesseract: returns fixed words at a fixed confidence for any page."""
-
     def __init__(self, lines: list[str], conf: float) -> None:
         self.name = "fake-ocr 1.0"
         self.lines = lines
@@ -141,8 +137,6 @@ class FakeOcr:
 
 
 class ScriptedModel:
-    """A non-mock adapter whose answers the test chooses; records every task it was given."""
-
     kind = ModelKind.OPENAI_COMPAT
     name = "scripted"
     vision = False

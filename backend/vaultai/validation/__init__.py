@@ -35,10 +35,8 @@ SEVERITY: dict[IssueCode, Severity] = {
     IssueCode.LEGAL_REVIEW_REQUIRED: _I,
 }
 
-# Issues that mean the document tries to steer an AI system.
 INJECTION_CODES = frozenset({IssueCode.PROMPT_INJECTION, IssueCode.HIDDEN_TEXT})
 
-# Raised while processing (model calls), not derivable from stored records; revalidation keeps them.
 PROCESS_CODES = frozenset({IssueCode.MODEL_UNAVAILABLE, IssueCode.MODEL_OUTPUT_REJECTED, IssueCode.UNGROUNDED_VALUE})
 
 

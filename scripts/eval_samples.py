@@ -30,13 +30,13 @@ from vaultai.schemas import SCHEMAS  # noqa: E402
 
 SAMPLES = REPO_ROOT / "samples"
 GATES = {
-    "doc_type": 1.0,           # every document classified correctly
-    "status": 1.0,             # every document routed to the expected review status
-    "issues": 1.0,             # warning/error issue codes match exactly
-    "line_items": 1.0,         # every line-item table read exactly
-    "preflight": 1.0,          # every adversarial file handled as expected
-    "fields": 0.95,            # share of expected field values extracted exactly
-    "obligations": 0.9,        # share of expected obligations found (kind, due date, party)
+    "doc_type": 1.0,
+    "status": 1.0,
+    "issues": 1.0,
+    "line_items": 1.0,
+    "preflight": 1.0,
+    "fields": 0.95,
+    "obligations": 0.9,
 }
 
 
@@ -139,7 +139,6 @@ def main() -> int:
                     obl_note = f"{found}/{len(want['obligations'])} (+{len(remaining)})"
                 risky_note = ""
                 if "risky_clause_kinds" in want:
-                    # Auto-renewal has its own issue code; "risky" means the other flagged clause kinds.
                     risky = {c["kind"] for c in clauses if c["risk"] != "none" and c["kind"] != "renewal"}
                     risky_note = "ok" if risky == set(want["risky_clause_kinds"]) else f"✗ {sorted(risky)}"
                 rows.append((rel, d["doc_type"], type_ok, len(want["fields"]) - len(misses), len(want["fields"]),

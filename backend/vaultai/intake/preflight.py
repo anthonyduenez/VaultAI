@@ -32,7 +32,6 @@ SIGNATURES: tuple[tuple[str, bytes], ...] = (
     ("tiff", b"II*\x00"),
     ("tiff", b"MM\x00*"),
 )
-# Recognizable non-document formats: a file carrying one of these under a document extension is spoofed.
 FOREIGN: tuple[bytes, ...] = (
     b"MZ", b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe", b"PK\x03\x04", b"Rar!",
     b"7z\xbc\xaf", b"\x1f\x8b", b"#!", b"GIF8", b"\xd0\xcf\x11\xe0", b"BM",
@@ -82,14 +81,10 @@ class Accepted:
 
 
 def sniff(data: bytes) -> str | None:
-    """The document kind the bytes really are, "foreign" for a known non-document format, else None."""
     kind = next((k for k, magic in SIGNATURES if data.startswith(magic)), None)
     if kind:
         return kind
     return "foreign" if any(data.startswith(m) for m in FOREIGN) else None
-
-
-# ---------------------------------------------------------------- PDF
 
 
 _NAME = re.compile(rb"/([^\s/<>\[\]()%{}]+)")
@@ -101,7 +96,6 @@ def _unescape(name: bytes) -> bytes:
 
 
 def pdf_names(data: bytes) -> set[bytes]:
-    """Every /Name token, hex escapes decoded, including names inside Flate-compressed object streams."""
     chunks = [data]
     budget = _STREAM_BUDGET
     for m in _STREAM.finditer(data):
@@ -117,9 +111,6 @@ def pdf_names(data: bytes) -> set[bytes]:
         budget -= len(inflated)
         chunks.append(inflated)
     return {_unescape(m.group(1)) for chunk in chunks for m in _NAME.finditer(chunk)}
-
-
-# ---------------------------------------------------------------- images
 
 
 def png_size(data: bytes) -> tuple[int, int] | None:
@@ -152,9 +143,6 @@ def jpeg_size(data: bytes) -> tuple[int, int] | None:
     return None
 
 
-# ---------------------------------------------------------------- text
-
-
 def _text_ok(data: bytes) -> bool:
     if b"\x00" in data:
         return False
@@ -166,9 +154,6 @@ def _text_ok(data: bytes) -> bool:
         return False
     printable = sum(1 for ch in text if ch in "\t\n\r\f" or unicodedata.category(ch)[0] != "C")
     return printable / len(text) >= MIN_PRINTABLE
-
-
-# ---------------------------------------------------------------- the checks
 
 
 def static_check(settings: Settings, name: str, data: bytes) -> Sniffed | Rejected:

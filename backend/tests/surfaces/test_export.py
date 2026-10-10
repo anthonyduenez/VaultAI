@@ -18,7 +18,7 @@ INJECTIONS = ['=HYPERLINK("http://x","y")', "+1+1", "-2+3", "@SUM(A1)"]
 
 def approved(ctx: AppContext, **kwargs: object) -> str:
     base = {"status": "approved", "approval_kind": "human", "approved_by": "sam", "approved_at": APPROVED_AT}
-    return insert_document(ctx, **{**base, **kwargs})  # type: ignore[arg-type]
+    return insert_document(ctx, **{**base, **kwargs})
 
 
 def export(client: TestClient, **filters: object) -> tuple[dict, bytes]:
@@ -32,7 +32,7 @@ def workbook(data: bytes) -> openpyxl.Workbook:
     return openpyxl.load_workbook(io.BytesIO(data))
 
 
-def rows(ws) -> list[dict[str, object]]:  # type: ignore[no-untyped-def]
+def rows(ws) -> list[dict[str, object]]:
     header = [c.value for c in ws[1]]
     return [dict(zip(header, (c.value for c in row), strict=True)) for row in ws.iter_rows(min_row=2)]
 

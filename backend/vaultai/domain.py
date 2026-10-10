@@ -51,7 +51,6 @@ DOC_TYPE_LABELS: dict[DocType, str] = {
     DocType.OTHER: "Other business document",
 }
 
-# Legal-adjacent types never auto-approve and always carry the issue-spotting disclaimer.
 LEGAL_DOC_TYPES: frozenset[DocType] = frozenset(
     {DocType.CONTRACT, DocType.AGREEMENT_LETTER, DocType.STATEMENT_OF_WORK, DocType.POLICY}
 )
@@ -84,9 +83,7 @@ TRANSITIONS: dict[DocStatus, frozenset[DocStatus]] = {
     _S.FAILED: frozenset({_S.PROCESSING}),
 }
 
-# Statuses whose records may appear in an export of approved data.
 EXPORTABLE: frozenset[DocStatus] = frozenset({_S.APPROVED, _S.EXPORTED})
-# Statuses a human acts on in the review queue.
 REVIEWABLE: frozenset[DocStatus] = frozenset({_S.READY, _S.NEEDS_REVIEW})
 
 
@@ -104,7 +101,6 @@ def check_transition(current: DocStatus, target: DocStatus) -> None:
         raise InvalidTransition(current, target)
 
 
-# Field corrections are allowed once processing has settled.
 EDITABLE: frozenset[DocStatus] = REVIEWABLE | EXPORTABLE | {_S.REJECTED}
 REPROCESSABLE: frozenset[DocStatus] = frozenset(s for s, targets in TRANSITIONS.items() if _S.PROCESSING in targets)
 
@@ -242,8 +238,6 @@ REVIEW_ACTION_TARGET: dict[ReviewAction, DocStatus] = {
     ReviewAction.DEFER: _S.NEEDS_REVIEW,
     ReviewAction.REOPEN: _S.NEEDS_REVIEW,
 }
-# Narrower than TRANSITIONS on purpose: a human decides only on records waiting for a decision,
-# and reopens only records that were already decided.
 REVIEW_ACTION_FROM: dict[ReviewAction, frozenset[DocStatus]] = {
     ReviewAction.APPROVE: REVIEWABLE,
     ReviewAction.REJECT: REVIEWABLE,
@@ -329,7 +323,6 @@ class ExportFormat(StrEnum):
 
 
 class ActionCategory(StrEnum):
-    # Declaration order is the Action Center's display order: time-critical and security items first.
     RENEWAL = "renewal"
     PAYMENT_DUE = "payment_due"
     INJECTION = "injection"
@@ -347,9 +340,6 @@ class ActionCategory(StrEnum):
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid", use_enum_values=False)
-
-
-# ---------------------------------------------------------------- documents
 
 
 class Evidence(ApiModel):
@@ -541,9 +531,6 @@ class DocumentList(ApiModel):
     by_status: list[StatusCount]
 
 
-# ---------------------------------------------------------------- intake
-
-
 class IntakeItem(ApiModel):
     id: int
     batch_id: str
@@ -568,9 +555,6 @@ class ProcessRequest(ApiModel):
 
 class ProcessResult(ApiModel):
     queued: list[str]
-
-
-# ---------------------------------------------------------------- review
 
 
 class FieldEdit(ApiModel):
@@ -616,9 +600,6 @@ class ObligationUpdate(ApiModel):
     status: ObligationStatus
 
 
-# ---------------------------------------------------------------- action center
-
-
 class ActionItem(ApiModel):
     id: str
     category: ActionCategory
@@ -641,9 +622,6 @@ class CategoryCount(ApiModel):
 class ActionCenter(ApiModel):
     items: list[ActionItem]
     counts: list[CategoryCount]
-
-
-# ---------------------------------------------------------------- dashboard + system
 
 
 class MoneyTotal(ApiModel):
@@ -725,9 +703,6 @@ class Metrics(ApiModel):
     recent: list[DocTiming]
 
 
-# ---------------------------------------------------------------- export
-
-
 class ExportFilters(ApiModel):
     doc_types: list[DocType] = Field(default_factory=list)
     date_from: date | None = None
@@ -771,9 +746,6 @@ class ExportJob(ApiModel):
     filename: str
     sha256: str
     duration_ms: int
-
-
-# ---------------------------------------------------------------- capture
 
 
 class ScannerDevice(ApiModel):

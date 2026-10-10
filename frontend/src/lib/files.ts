@@ -2,7 +2,6 @@ import type { PickedFile } from "../api/client";
 
 export const ACCEPT = ".pdf,.png,.jpg,.jpeg,.tif,.tiff,.txt,application/pdf,image/png,image/jpeg,image/tiff,text/plain";
 
-// OS metadata files (.DS_Store, ._foo) would only show up as preflight rejections.
 const isHidden = (name: string) => name.startsWith(".");
 
 function readEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {

@@ -1,5 +1,3 @@
-"""Egress guard, job queue, and metrics: the process-level pieces around the pipeline."""
-
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +14,6 @@ from vaultai.pipeline.queue import JobQueue
 
 BACKEND = Path(__file__).resolve().parents[2]
 
-# Run in a child interpreter: the guard patches sockets process-wide and must not leak into other tests.
 EGRESS_PROBE = f"""
 import socket, sys
 sys.path.insert(0, {str(BACKEND)!r})

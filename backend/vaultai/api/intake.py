@@ -39,7 +39,6 @@ async def upload(request: Request, ctx: Ctx) -> list[IntakeItem]:
         batch_id = new_batch_id()
         items: list[IntakeItem] = []
         for upload_file in files:
-            # Oversize files arrive truncated at max_file_bytes + 1, which preflight rejects as too large.
             data = await read_capped(upload_file, ctx.settings.max_file_bytes)
             items.append(
                 await run_in_threadpool(

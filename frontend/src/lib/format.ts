@@ -1,6 +1,5 @@
 import type { Tone } from "./display";
 
-// One fixed locale keeps amounts and dates identical on every reviewer's screen and in tests.
 const LOCALE = "en-US";
 
 const moneyFormatters = new Map<string, Intl.NumberFormat>();

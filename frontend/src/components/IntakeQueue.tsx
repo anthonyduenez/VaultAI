@@ -17,7 +17,6 @@ const MIME_LABEL: Record<string, string> = {
   "text/plain": "TXT",
 };
 
-/** Accepted and stored, but not yet sent through the pipeline. */
 const isQueued = (item: IntakeItem) => item.preflight === "accepted" && item.doc_status === "imported";
 export const isProcessing = (item: IntakeItem) => item.doc_status === "processing";
 

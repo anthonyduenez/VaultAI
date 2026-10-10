@@ -34,7 +34,6 @@ class Money:
 
 def _number(num: str, currency: str | None) -> Decimal | None:
     if re.fullmatch(r"\d{1,3}(?:\.\d{3})+,\d{2}", num) or re.fullmatch(r"\d+,\d{2}", num):
-        # Decimal comma is only read as such for currencies printed that way; "1,23" in a $ amount is ambiguous.
         if currency != "EUR":
             return None
         num = num.replace(".", "").replace(",", ".")
@@ -69,8 +68,6 @@ def parse_money(text: str) -> Money | None:
     found = find_money(text)
     return found[0] if found else None
 
-
-# ---------------------------------------------------------------- dates
 
 MONTHS = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
@@ -119,8 +116,6 @@ def find_dates(text: str, date_order: str = "MDY") -> list[DateHit]:
             taken.append((m.start(), m.end()))
     return sorted(hits, key=lambda h: h.start)
 
-
-# ---------------------------------------------------------------- written amounts
 
 _UNITS = {w: i for i, w in enumerate(
     "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
@@ -175,8 +170,6 @@ def number_word(text: str) -> int | None:
         return sum(_SMALL_NUMBERS[w] for w in words)
     return None
 
-
-# ---------------------------------------------------------------- identifiers
 
 _IDENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9\-/.#]*[A-Za-z0-9]|[0-9]")
 

@@ -27,12 +27,10 @@ from vaultai import domain  # noqa: E402
 
 OUT = ROOT / "frontend" / "src" / "api" / "types.ts"
 
-# Request bodies: fields with defaults are optional for the caller.
 REQUEST_MODELS = {
     "ProcessRequest", "FieldEdit", "ReviewRequest", "BatchReviewRequest", "ObligationUpdate",
     "ExportFilters", "ScanRequest", "PageEdit", "AssembleRequest", "DeleteAllRequest", "NewScanSession",
 }
-# Status rules the UI must follow; emitted so the frontend never hand-copies them.
 STATUS_SETS = ("REVIEWABLE", "EXPORTABLE", "EDITABLE", "REPROCESSABLE")
 
 
@@ -77,7 +75,6 @@ def render() -> str:
         "",
     ]
     members = vars(domain)
-    # dict.fromkeys dedupes module-level aliases such as `_S = DocStatus`.
     enums = list(dict.fromkeys(
         v for v in members.values() if isinstance(v, type) and issubclass(v, StrEnum) and v.__module__ == domain.__name__
     ))

@@ -7,7 +7,7 @@ from vaultai.context import AppContext
 from vaultai.search import fts_query
 
 
-def ids(response) -> list[str]:  # type: ignore[no-untyped-def]
+def ids(response) -> list[str]:
     assert response.status_code == 200, response.text
     return [item["id"] for item in response.json()["items"]]
 

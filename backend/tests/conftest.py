@@ -13,8 +13,6 @@ SAMPLES = REPO_ROOT / "samples"
 
 
 class NullModel:
-    """Adapter stand-in for tests that never reach the model."""
-
     kind = ModelKind.MOCK
     name = "null"
     vision = False

@@ -54,7 +54,6 @@ export function PhoneCapture({ onImported }: { onImported: () => void }) {
     try {
       await cancelPhoneSession(id);
     } catch {
-      // The session dies on expiry regardless; nothing else to undo locally.
     }
   };
 

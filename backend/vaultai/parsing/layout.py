@@ -13,7 +13,6 @@ from functools import cached_property
 Box = tuple[float, float, float, float]
 
 TEXT_LINES_PER_PAGE = 60
-# A horizontal gap wider than this many line heights starts a new column span.
 SPAN_GAP_HEIGHTS = 2.0
 
 
@@ -69,7 +68,6 @@ class Page:
     image: str | None = None
     image_sha256: str | None = None
     ocr_confidence: float | None = None
-    # Boxes of hand-drawn curves and small embedded images: how a signature shows up on a PDF page.
     marks: tuple[Box, ...] = ()
 
 

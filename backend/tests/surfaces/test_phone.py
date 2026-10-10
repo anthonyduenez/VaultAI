@@ -102,7 +102,7 @@ def test_status_needs_the_right_token_from_the_local_network(desktop: TestClient
 def test_expired_and_cancelled_sessions_are_404(desktop: TestClient, phone_ctx: AppContext) -> None:
     with phone_ctx.db() as conn:
         stale = phone.create_pairing(phone_ctx, conn, now=db.now() - timedelta(seconds=601))
-    expired_id, expired_token = re.search(r"/m/([\w-]+)#([\w-]+)", stale.url).groups()  # type: ignore[union-attr]
+    expired_id, expired_token = re.search(r"/m/([\w-]+)#([\w-]+)", stale.url).groups()
     lan = handset(phone_ctx)
     assert lan.get(f"/p/{expired_id}/status", headers={"X-Pairing-Token": expired_token}).status_code == 404
     assert lan.get(f"/m/{expired_id}").status_code == 404
@@ -155,7 +155,7 @@ def test_submit_assembles_once_and_strips_metadata(desktop: TestClient, phone_ct
 def test_mobile_page_is_self_contained_with_a_per_response_nonce(desktop: TestClient, phone_ctx: AppContext) -> None:
     session_id, _, _ = pair(desktop)
     response = handset(phone_ctx).get(f"/m/{session_id}")
-    nonce = re.search(r"script-src 'nonce-([\w-]+)'", response.headers["content-security-policy"]).group(1)  # type: ignore[union-attr]
+    nonce = re.search(r"script-src 'nonce-([\w-]+)'", response.headers["content-security-policy"]).group(1)
     html = response.text
     assert response.status_code == 200
     assert html.count(f'nonce="{nonce}"') == 2

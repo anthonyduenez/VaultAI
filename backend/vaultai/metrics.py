@@ -15,7 +15,6 @@ from vaultai.domain import AuditAction, DocStatus, DocTiming, GpuStatus, Metrics
 from vaultai.pipeline.cache import HITS, MISSES
 
 GPU_TTL_S = 5.0
-# A document counts as human-reviewed once a person approved, rejected, deferred, or corrected it.
 REVIEW_ACTIONS = tuple(a.value for a in (AuditAction.APPROVE, AuditAction.REJECT, AuditAction.DEFER, AuditAction.EDIT_FIELD))
 _REVIEWED = f"action IN ({', '.join('?' * len(REVIEW_ACTIONS))})"
 _gpu_lock = threading.Lock()
@@ -74,14 +73,14 @@ def compute_metrics(ctx: AppContext) -> Metrics:
             "SELECT COUNT(DISTINCT i.doc_id) FROM issues i JOIN documents d ON d.id = i.doc_id "
             "WHERE i.severity = ? AND d.processed_at IS NOT NULL", (Severity.ERROR.value,)).fetchone()[0]
         reviewed = conn.execute(
-            f"SELECT COUNT(DISTINCT doc_id) FROM audit_log WHERE {_REVIEWED} AND doc_id IN "  # noqa: S608
+            f"SELECT COUNT(DISTINCT doc_id) FROM audit_log WHERE {_REVIEWED} AND doc_id IN "
             "(SELECT id FROM documents WHERE processed_at IS NOT NULL)", REVIEW_ACTIONS).fetchone()[0]
         auto = conn.execute(
             "SELECT COUNT(DISTINCT doc_id) FROM audit_log WHERE action = ? AND doc_id IN "
             "(SELECT id FROM documents WHERE processed_at IS NOT NULL)", (AuditAction.AUTO_APPROVE.value,)).fetchone()[0]
         corrections = conn.execute(
             "SELECT COUNT(*) AS fields, COALESCE(SUM(edited_at IS NOT NULL), 0) AS edited FROM fields WHERE doc_id IN "
-            f"(SELECT DISTINCT doc_id FROM audit_log WHERE {_REVIEWED})", REVIEW_ACTIONS).fetchone()  # noqa: S608
+            f"(SELECT DISTINCT doc_id FROM audit_log WHERE {_REVIEWED})", REVIEW_ACTIONS).fetchone()
         export_ms = conn.execute("SELECT AVG(duration_ms) FROM exports").fetchone()[0]
         counters = dict(conn.execute("SELECT name, value FROM counters WHERE name IN (?, ?)", (HITS, MISSES)).fetchall())
         recent = [

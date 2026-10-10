@@ -39,7 +39,6 @@ from vaultai.storage import Storage
 
 SCAN_TIMEOUT_S = 120
 LIST_TIMEOUT_S = 30
-# A scan validates its device against this listing; reprobing would add a USB/network round trip to every page.
 LISTING_TTL_S = 30
 MAX_SESSION_PAGES = 100
 SCAN_FAILED = Problem(502, "scan_failed", "The scanner did not return a page. Check the paper and try again.")
@@ -128,7 +127,6 @@ _PDFIUM_LOCK = threading.Lock()
 
 
 def scanned_look(image: Image.Image, seed: int) -> Image.Image:
-    """A slight deterministic skew and speckle so demo pages look like they came off a feeder."""
     rng = random.Random(seed)
     white = 255 if image.mode == "L" else (255, 255, 255)
     out = image.rotate(rng.uniform(-0.8, 0.8), resample=Image.Resampling.BICUBIC, fillcolor=white)
@@ -205,9 +203,6 @@ def build_scanner(settings: Settings) -> ScannerBackend | None:
 def backend_names(settings: Settings) -> list[str]:
     scanner = build_scanner(settings)
     return [scanner.name] if scanner is not None else []
-
-
-# ---------------------------------------------------------------- sessions
 
 
 def _png(image: Image.Image) -> bytes:

@@ -99,9 +99,6 @@ def _ungrounded(label: str, key: str | None = None) -> Issue:
                  f"The model proposed a {label} that is not supported by the document text; it was discarded.", key)
 
 
-# ---------------------------------------------------------------- classify
-
-
 def ground_classify(raw: object, task: ClassifyTask) -> tuple[DocType | None, float, list[Issue]]:
     out, issues = _parse(ClassifyOut, raw)
     if out is None or out.doc_type is None:
@@ -115,12 +112,8 @@ def ground_classify(raw: object, task: ClassifyTask) -> tuple[DocType | None, fl
     return doc_type, min(out.confidence, MODEL_CONFIDENCE_CAP), []
 
 
-# ---------------------------------------------------------------- extract
-
-
 def _typed(value_type: ValueType, value: str, quote: str, options: tuple[str, ...], date_order: str
            ) -> tuple[str, str, str | None] | None:
-    """(canonical value, printed text, currency) when `value` reads as its type and agrees with the quote."""
     if value_type is ValueType.MONEY:
         stated = find_money(value)
         if not stated:
@@ -175,9 +168,6 @@ def ground_extract(raw: object, task: ExtractTask, doc: Doc, existing: Mapping[s
         line = doc.by_id[f.line_id or ""]
         kept.append(Found(spec.key, value, printed, confidence, evidence(line), currency, FieldOrigin.MODEL, model_name))
     return kept, issues
-
-
-# ---------------------------------------------------------------- analyze
 
 
 @dataclass(frozen=True)

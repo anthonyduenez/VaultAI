@@ -1,5 +1,4 @@
 :root {
-  /* Surfaces */
   --navy-950: #0b1524;
   --navy-900: #0f1b2d;
   --navy-800: #172740;
@@ -11,13 +10,11 @@
   --border: #e2e6ec;
   --border-strong: #cdd4de;
 
-  /* Ink */
   --text: #142033;
   --text-muted: #556274;
   --text-subtle: #7c8797;
   --text-inverse: #f4f7fb;
 
-  /* Tones: fg = text/icon on light, bg = tinted fill, line = border, solid = filled mark */
   --neutral-fg: #3c4858;
   --neutral-bg: #eef1f5;
   --neutral-line: #d5dbe4;
@@ -46,7 +43,6 @@
   --brand-accent: #2dd4bf;
   --focus: #2f7de1;
 
-  /* Type */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --fs-xs: 11.5px;
@@ -56,7 +52,6 @@
   --fs-xl: 20px;
   --fs-2xl: 26px;
 
-  /* 8px grid */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;

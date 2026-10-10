@@ -128,7 +128,6 @@ class Classification:
     doc_type: DocType
     confidence: float
     method: ClassificationMethod
-    # Score lead over the runner-up; small margins send the document to the model when one is configured.
     margin: float = math.inf
 
     @property

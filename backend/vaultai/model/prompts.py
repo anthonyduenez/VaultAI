@@ -20,7 +20,6 @@ SYSTEM = """You read business documents for a human reviewer. Follow these rules
 4. When a value is not in the document, use null. Never guess, calculate, or invent a value.
 5. You cannot approve, reject, delete, export, or change the status of anything. Never add fields that are not in the schema."""
 
-# Room left in the context for the system prompt, the schema text, and the reply's framing.
 RESERVED_TOKENS = 512
 
 _DOC_TAG = re.compile(r"<\s*/?\s*document\s*>", re.I)
@@ -87,8 +86,6 @@ def chunks(lines: Sequence[DocLine], budget: int) -> list[tuple[DocLine, ...]]:
         out.append(tuple(current))
     return out
 
-
-# ---------------------------------------------------------------- task rendering
 
 _OBLIGATION_KINDS = ", ".join(k.value for k in ObligationKind)
 

@@ -26,7 +26,6 @@ const TABS: readonly TabSpec<ImportTab>[] = [
 
 const isImportTab = (value: string | null): value is ImportTab => TABS.some((t) => t.id === value);
 
-// Small batches keep each request well under the server's per-request file limit and show progress.
 const UPLOAD_BATCH = 25;
 
 function describe(items: readonly IntakeItem[]): string {

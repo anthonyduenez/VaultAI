@@ -77,7 +77,6 @@ async def delete_all_data(body: DeleteAllRequest, ctx: Ctx) -> Response:
     restart = ctx.queue is not None
     await stop_queue(ctx)
     try:
-        # Runs on the event loop on purpose: no new request is admitted while files and the database are removed.
         deletion.delete_all(ctx, actor=ctx.settings.reviewer_name)
     finally:
         if restart:

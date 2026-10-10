@@ -14,7 +14,6 @@ export interface Reply {
 
 type Handler = (call: RecordedCall) => Reply | undefined;
 
-/** Replaces global fetch; records every request and answers from `handler` (404 when it returns undefined). */
 export function mockFetch(handler: Handler): RecordedCall[] {
   const calls: RecordedCall[] = [];
   vi.stubGlobal(

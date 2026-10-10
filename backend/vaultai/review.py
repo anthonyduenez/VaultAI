@@ -77,8 +77,6 @@ def batch_review(ctx: AppContext, request: BatchReviewRequest, *, actor: str, no
     return BatchReviewResult(results=results)
 
 
-# ---------------------------------------------------------------- field edits
-
 _MONEY_NOISE = re.compile("|".join(map(re.escape, sorted(CURRENCY_SYMBOLS, key=len, reverse=True))) + r"|[\s,]")
 
 
@@ -175,7 +173,6 @@ def update_obligation(
 
 
 def build_review_queue(docs: list[DocumentSummary]) -> ReviewQueue:
-    """needs_review first, then ready, deferred last; oldest first within each. Groups feed batch review."""
     pending = sorted(
         (d for d in docs if d.status in REVIEWABLE),
         key=lambda d: (d.deferred, d.status is not DocStatus.NEEDS_REVIEW, d.created_at, d.id),

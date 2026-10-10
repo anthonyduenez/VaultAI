@@ -22,11 +22,9 @@ from vaultai.parsing.layout import Doc, Line
 from vaultai.parsing.tables import DELIVERABLE_COLUMNS, read_rows
 from vaultai.schemas import SCHEMAS
 
-# ---------------------------------------------------------------- text structure
 
 FOOTER_ZONE = 0.93
 _PAGE_FOOTER = re.compile(r"^page \d+(?: of \d+)?$", re.I)
-# "1. Services", "4.2 Fees", "Section 7: Term". A bare number ("410 Pier Avenue") is an address, not a heading.
 HEADING = re.compile(
     r"^(?:(?:Section|SECTION|Article|ARTICLE)\s+\d{1,3}[.:]?|\d{1,2}\.(?:\d{1,2}\.?)*)\s+(?P<title>[A-Z][A-Za-z0-9 ,&/'()-]{1,60})$")
 _ABBREV = re.compile(r"\b(?:Inc|Co|Corp|Ltd|No|Nos|Mr|Mrs|Ms|Dr|St|Jr|Sr|vs|Rev|Sec|approx|e\.g|i\.e|U\.S|L\.L\.C)\.$", re.I)
@@ -64,7 +62,6 @@ def _median(values: list[float]) -> float:
 
 
 def paragraphs(doc: Doc) -> list[list[Line]]:
-    """Runs of single-column lines; a gap clearly wider than the page's usual line pitch starts a new paragraph."""
     out: list[list[Line]] = []
     for page in doc.pages:
         rows = [ln for ln in page.lines if ln.flag is None and not _furniture(ln)]
@@ -122,8 +119,6 @@ def sentences(doc: Doc) -> list[Sentence]:
 def _sentence_found(ctx: Ctx, key: str, s: Sentence, value: str | None, raw: str | None, conf: float = PATTERN) -> Found:
     return found(ctx, key, s.line, value, raw, conf)
 
-
-# ---------------------------------------------------------------- clauses and risk
 
 CLAUSE_KINDS: tuple[tuple[ClauseKind, re.Pattern[str]], ...] = (
     (ClauseKind.SIGNATURES, re.compile(r"in witness whereof|accepted and agreed|\bsignatures?\b", re.I)),
@@ -202,7 +197,6 @@ def clause_findings(text: str) -> list[Finding]:
 
 
 def clause_kind(heading: str, text: str) -> ClauseKind:
-    """The heading decides; body keywords only break a tie when the heading names no known kind."""
     for kind, rx in CLAUSE_KINDS:
         if rx.search(heading):
             return kind
@@ -259,8 +253,6 @@ def clauses(doc: Doc) -> list[ClauseRec]:
             out.append(replace(rec, heading="Signatures", text=" ".join(ln.text for ln in body[sig:])))
     return out
 
-
-# ---------------------------------------------------------------- parties and legal fields
 
 _DQ = "[\"“”]"
 _PARTY = (r"(?P<name{n}>[A-Z][\w&.,' -]+?)(?:,\s+an?\s+[^()]*?)?\s*\(\s*(?:the\s+|hereinafter\s+)?" + _DQ
@@ -449,8 +441,6 @@ def _letter_fields(ctx: Ctx, sents: list[Sentence], blocks: list[SignatureBlock]
         yield _sentence_found(ctx, "termination", term, term.text, term.text)
 
 
-# ---------------------------------------------------------------- obligations
-
 _MODAL = (r"(?P<modal>shall not|shall|will not|will|must not|must|agrees? to|undertakes? to|"
           r"(?:is|are) required(?: to)?)")
 _NOT_DUTIES = {"receive", "be", "have", "retain", "own", "remain", "continue", "survive", "accrue", "benefit"}
@@ -517,7 +507,6 @@ def _duties(sents: list[Sentence], subject: str, date_order: str) -> Iterable[tu
         if not m:
             continue
         verb = m["rest"].split()[0].lower() if m["rest"].split() else ""
-        # "Services will be performed" describes; "Airfare must be booked" obliges.
         if verb in _NOT_DUTIES and not (verb == "be" and m["modal"].lower() != "will"):
             continue
         due = _due(s.text, date_order)

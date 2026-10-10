@@ -69,7 +69,6 @@ STATUS_ACTION: dict[DocStatus, tuple[ActionCategory, Severity]] = {
     DocStatus.FAILED: (A.PROCESSING_FAILURE, Severity.ERROR),
 }
 
-# Issues on a record a human already approved or rejected were seen at review time.
 SETTLED: frozenset[DocStatus] = EXPORTABLE | {DocStatus.REJECTED}
 DEADLINE_WINDOW_DAYS = 60
 URGENT_DAYS = 30
@@ -129,7 +128,6 @@ def build_action_center(
     today: date,
     now: datetime,
 ) -> ActionCenter:
-    """`issues` are those on unsettled documents only."""
     by_id = {d.id: d for d in docs}
     items: list[ActionItem] = []
 

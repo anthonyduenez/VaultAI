@@ -20,7 +20,6 @@ function NotFound() {
   );
 }
 
-// Hash routing keeps deep links working whatever the backend does with unknown paths under "/".
 export function App() {
   return (
     <ToastProvider>

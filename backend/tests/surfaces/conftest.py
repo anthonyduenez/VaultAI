@@ -65,11 +65,11 @@ def insert_document(
     primary_id: str | None = None,
     confidence: float | None = 0.9,
     text: str = "",
-    fields: list[dict[str, Any]] = (),  # type: ignore[assignment]
-    issues: list[tuple[str, str, str]] = (),  # type: ignore[assignment]
-    obligations: list[dict[str, Any]] = (),  # type: ignore[assignment]
-    clauses: list[dict[str, Any]] = (),  # type: ignore[assignment]
-    line_items: list[dict[str, Any]] = (),  # type: ignore[assignment]
+    fields: list[dict[str, Any]] = (),
+    issues: list[tuple[str, str, str]] = (),
+    obligations: list[dict[str, Any]] = (),
+    clauses: list[dict[str, Any]] = (),
+    line_items: list[dict[str, Any]] = (),
     approved_at: datetime | None = None,
     approved_by: str | None = None,
     approval_kind: str | None = None,
@@ -80,7 +80,6 @@ def insert_document(
     next_deadline: str | None = None,
     model_name: str | None = "rules",
 ) -> str:
-    """A processed document as the core pipeline would leave it, written straight into the tables."""
     doc_id = secrets.token_hex(8)
     data = raw if raw is not None else f"%PDF-1.4 {doc_id}".encode()
     stored_name = Storage.new_name("pdf")
@@ -143,8 +142,6 @@ def insert_document(
 
 @dataclass
 class FakeCore:
-    """Stands in for the core's ingest_bytes and revalidate seams, recording what they receive."""
-
     ingested: list[dict[str, Any]] = field(default_factory=list)
     revalidated: list[str] = field(default_factory=list)
 

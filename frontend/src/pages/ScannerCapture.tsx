@@ -19,7 +19,6 @@ import { optionalText, plural } from "../lib/format";
 
 const DPI_OPTIONS = [150, 200, 300, 600] as const;
 
-/** Keeps local edits and order for pages that still exist; appends newly scanned pages. */
 function reconcile(prev: readonly EditablePage[], session: CaptureSession, retakenId: number | null): EditablePage[] {
   const live = new Set(session.pages.map((p) => p.id));
   const known = new Set(prev.map((p) => p.id));

@@ -32,7 +32,6 @@ from vaultai.extraction.normalize import (
 from vaultai.parsing.layout import Doc, Line, Span, page_of
 from vaultai.schemas import KV_PREFIX, SCHEMAS, DocSchema, FieldSpec
 
-# Two independent positional signals (first line and the most prominent type) for an unlabeled name.
 PROMINENT = 0.9
 TOP_LINES = 8
 
@@ -55,11 +54,7 @@ def found(ctx: Ctx, key: str, line: Line, value: str | None, raw: str | None, co
     return Found(key, value, raw, scaled(ctx.doc, line, confidence), evidence(line), currency)
 
 
-# ---------------------------------------------------------------- typed reading of a value string
-
-
 def read_value(ctx: Ctx, spec: FieldSpec, text: str) -> tuple[str | None, str, str | None] | None:
-    """(canonical value, printed substring, currency) for `text` read as spec.value_type, or None."""
     vt = spec.value_type
     if vt is ValueType.MONEY:
         hits = find_money(text, require_marker=True)
@@ -85,8 +80,6 @@ def read_value(ctx: Ctx, spec: FieldSpec, text: str) -> tuple[str | None, str, s
     return (value, value, None)
 
 
-# ---------------------------------------------------------------- label/value matching
-
 _LABEL_TAIL = re.compile(r"^\s*(?:\([^)]{0,24}\))?\s*(?:\d+(?:\.\d+)?\s*%)?\s*(?P<sep>[:#]|\.(?=\s|$))?\s*")
 
 
@@ -105,7 +98,6 @@ def is_label(span: Span) -> bool:
 
 
 def _below(doc: Doc, line: Line, span: Span) -> tuple[Line, Span] | None:
-    """The span directly under `span` on the next line of the same page."""
     page = doc.page(page_of(line.id))
     rows = [ln for ln in page.lines if ln.flag is None]
     idx = rows.index(line)
@@ -117,7 +109,6 @@ def _below(doc: Doc, line: Line, span: Span) -> tuple[Line, Span] | None:
 
 
 def _aliases(spec: FieldSpec) -> tuple[str, ...]:
-    """A field without aliases is found by its own label, when that label is specific (two words or more)."""
     label = spec.label.lower()
     return spec.aliases or ((label,) if len(label.split()) >= 2 else ())
 
@@ -154,8 +145,6 @@ def label_value(ctx: Ctx, spec: FieldSpec, taken: set[tuple[str, int]]) -> Found
     return None
 
 
-# ---------------------------------------------------------------- positional patterns
-
 Extractor = Callable[[Ctx], Iterable[Found]]
 
 DOC_TITLE_WORDS = re.compile(
@@ -178,7 +167,6 @@ def _height(line: Line) -> float:
 
 
 def _plain_name(span: Span) -> bool:
-    """Could this span be a business name: not a label, title word, date, amount, contact detail, address, or bare id."""
     t = clean_text(span.text)
     return bool(
         re.search(r"[A-Za-z]{2}", t) and not is_label(span) and ":" not in t and not DOC_TITLE_WORDS.match(t)
@@ -188,8 +176,6 @@ def _plain_name(span: Span) -> bool:
 
 
 def issuer(key: str) -> Extractor:
-    """The business named first at the top of page 1 (letterhead, store name, check payer)."""
-
     def extract(ctx: Ctx) -> Iterable[Found]:
         tops = top_lines(ctx.doc)
         for line in tops[:3]:
@@ -205,8 +191,6 @@ def issuer(key: str) -> Extractor:
 
 
 def title(key: str) -> Extractor:
-    """First span of the most prominent line near the top of page 1."""
-
     def extract(ctx: Ctx) -> Iterable[Found]:
         tops = top_lines(ctx.doc)
         if not tops:
@@ -250,8 +234,6 @@ def card_payment(ctx: Ctx) -> Iterable[Found]:
             return
 
 
-# ---------------------------------------------------------------- checks
-
 MICR = re.compile(r"[A⑆](\d{9})[A⑆]\s*([\d -]+?)\s*[C⑈]\s*(\d+)")
 _BANK = re.compile(r"\b(Bank|Credit Union|Savings|Bancorp|Trust Company|Federal Credit)\b", re.I)
 
@@ -278,7 +260,6 @@ def micr(ctx: Ctx) -> Iterable[Found]:
 
 
 def check_number(ctx: Ctx) -> Iterable[Found]:
-    """A bare 3-8 digit number on the right of the top lines, corroborated by the MICR line when present."""
     micr_number = next((m.group(3) for ln in ctx.doc.visible if (m := MICR.search(ln.text))), None)
     for line in top_lines(ctx.doc)[:3]:
         for span in line.spans:
@@ -290,7 +271,6 @@ def check_number(ctx: Ctx) -> Iterable[Found]:
 
 
 def check_amounts(ctx: Ctx) -> Iterable[Found]:
-    """The amount box (money on the payee line, or a span holding only an amount) and the written amount line."""
     written = None
     for line in ctx.doc.visible:
         text = line.text.strip().strip("*")
@@ -314,8 +294,6 @@ def check_amounts(ctx: Ctx) -> Iterable[Found]:
         conf = PROMINENT if written and written[2] == money.amount else PATTERN
         yield found(ctx, "amount", line, money_str(money.amount), money.raw, conf, money.currency)
 
-
-# ---------------------------------------------------------------- signatures
 
 _BY = re.compile(r"^by:?(?:\s|$)", re.I)
 _SIGNATURE_LABEL = re.compile(r"^(?:authorized\s+|customer\s+|employee\s+|applicant\s+)?signature\b", re.I)
@@ -398,8 +376,6 @@ def signature_present(ctx: Ctx) -> Iterable[Found]:
         yield found(ctx, "signature_present", line, "true" if signed else "false", b.evidence.text, PATTERN)
 
 
-# ---------------------------------------------------------------- generic key/value pairs
-
 _KV = re.compile(r"^(?P<label>[A-Za-z][A-Za-z0-9 /&()'.-]{1,40}?)\s*:\s*(?P<value>\S.*)?$")
 
 
@@ -428,11 +404,7 @@ def kv_label(key: str) -> str:
     return key[len(KV_PREFIX):].replace("_", " ").capitalize()
 
 
-# ---------------------------------------------------------------- registry
-
-
 def _legal(ctx: Ctx) -> Iterable[Found]:
-    # analysis.contracts builds on this module, so it is imported at call time.
     from vaultai.analysis.contracts import legal_fields
 
     return legal_fields(ctx)
@@ -471,7 +443,6 @@ def _currency(ctx: Ctx, fields: dict[str, Found]) -> Found | None:
         f = fields.get(key or "")
         if f is None or f.currency is None or f.evidence is None:
             continue
-        # "$" alone is read as USD unless the document names another dollar currency.
         currency = next(iter(dollars)) if f.currency == "USD" and len(dollars) == 1 else f.currency
         return replace(f, key="currency", value=currency, raw_text=f.raw_text, currency=None,
                        confidence=min(f.confidence, PATTERN))

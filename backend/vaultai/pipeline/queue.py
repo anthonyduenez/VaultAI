@@ -18,7 +18,6 @@ class JobQueue:
         self.ctx = ctx
         self._lock = threading.Lock()
         self._pending: set[str] = set()
-        # Ids enqueued before start() has a running loop to hand them to.
         self._backlog: list[str] = []
         self._loop: asyncio.AbstractEventLoop | None = None
         self._queue: asyncio.Queue[str] | None = None
@@ -78,7 +77,7 @@ class JobQueue:
                 self._pending.discard(doc_id)
             try:
                 await asyncio.to_thread(process_document, self.ctx, doc_id)
-            except Exception as exc:  # noqa: BLE001 - a worker must outlive any single document
+            except Exception as exc:
                 log.warning("worker error doc=%s error=%s", doc_id, type(exc).__name__)
             finally:
                 self._queue.task_done()

@@ -113,15 +113,12 @@ class Selection:
 
 @dataclass(frozen=True)
 class Details:
-    """Rows behind the evidence, warnings, and obligations sheets, by document id."""
-
     fields: dict[str, list[ExtractedField]]
     issues: dict[str, list[ValidationIssue]]
     obligations: dict[str, list[Obligation]]
 
 
 def _where(filters: ExportFilters, statuses: frozenset[DocStatus]) -> tuple[str, list[object]]:
-    """The explorer's filter, so a preview and the document list never disagree on what matches."""
     return search.where(search.DocumentQuery(
         statuses=tuple(statuses), doc_types=tuple(filters.doc_types), date_from=filters.date_from,
         date_to=filters.date_to,
