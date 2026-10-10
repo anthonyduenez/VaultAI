@@ -35,11 +35,24 @@ def _limit(req: dict) -> None:
 
 
 def _pil(max_pixels: int):
+    import pi_heif
     from PIL import Image
 
+    pi_heif.register_heif_opener(thumbnails=False, depth_images=False, aux_images=False)
     Image.MAX_IMAGE_PIXELS = max_pixels
     warnings.simplefilter("error", Image.DecompressionBombWarning)
     return Image
+
+
+def _pages(im, limit: int):
+    """The open image positioned at each of its first `limit` pages."""
+    if im.format == "HEIF":
+        # A HEIF file opens on its primary image, the photo. Seeking would switch to its other top-level images.
+        yield im
+        return
+    for i in range(min(getattr(im, "n_frames", 1), limit)):
+        im.seek(i)
+        yield im
 
 
 def probe_pdf(req: dict) -> dict:
@@ -54,15 +67,18 @@ def probe_pdf(req: dict) -> dict:
 
 def probe_image(req: dict) -> dict:
     Image = _pil(req["max_pixels"])
-    with Image.open(req["path"]) as im:
-        frames = getattr(im, "n_frames", 1)
-        for i in range(min(frames, req["max_pages"] + 1)):
-            im.seek(i)
-            if im.size[0] * im.size[1] > req["max_pixels"]:
-                return {"ok": True, "pages": frames, "too_large": True}
+    pages = 0
+    try:
+        with Image.open(req["path"]) as im:
+            for page in _pages(im, req["max_pages"] + 1):
+                pages += 1
+                if page.size[0] * page.size[1] > req["max_pixels"]:
+                    return {"ok": True, "pages": pages, "too_large": True}
+    except (Image.DecompressionBombWarning, Image.DecompressionBombError):
+        return {"ok": True, "pages": 1, "too_large": True}
     with Image.open(req["path"]) as im:
         im.verify()
-    return {"ok": True, "pages": frames, "too_large": False}
+    return {"ok": True, "pages": pages, "too_large": False}
 
 
 def _save_png(img, out_dir: str, page_no: int) -> tuple[str, str]:
@@ -173,14 +189,11 @@ def parse_pdf(req: dict) -> dict:
 
 def parse_image(req: dict) -> dict:
     Image = _pil(req["max_pixels"])
-    from PIL import ImageOps, ImageSequence
+    from PIL import ImageOps
 
     pages = []
     with Image.open(req["path"]) as im:
-        for index, frame in enumerate(ImageSequence.Iterator(im)):
-            if index >= req["max_pages"]:
-                break
-            page_no = index + 1
+        for page_no, frame in enumerate(_pages(im, req["max_pages"]), start=1):
             img = ImageOps.exif_transpose(frame.copy()).convert("RGB")
             w, h = img.size
             if w * h > req["max_pixels"]:

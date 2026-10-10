@@ -26,7 +26,7 @@ def test_supported_types_are_accepted_with_sniffed_mime_and_page_count(mock_ctx)
 @pytest.mark.parametrize(
     ("name", "data", "error"),
     [
-        ("report.docx", b"PK\x03\x04" + b"\0" * 64, "This file type is not supported. Use PDF, PNG, JPEG, TIFF, or plain text."),
+        ("report.docx", b"PK\x03\x04" + b"\0" * 64, "This file type is not supported. Use PDF, PNG, JPEG, HEIC, TIFF, or plain text."),
         ("invoice.pdf", b"MZ\x90\x00" + b"\0" * 200, "The file's contents do not match its extension."),
         ("image.jpg", png_bytes(), "The file's contents do not match its extension."),
         ("notes.txt", b"%PDF-1.4 not really text", "The file's contents do not match its extension."),

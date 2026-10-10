@@ -1,6 +1,7 @@
 import type { PickedFile } from "../api/client";
 
-export const ACCEPT = ".pdf,.png,.jpg,.jpeg,.tif,.tiff,.txt,application/pdf,image/png,image/jpeg,image/tiff,text/plain";
+export const ACCEPT =
+  ".pdf,.png,.jpg,.jpeg,.heic,.heif,.tif,.tiff,.txt,application/pdf,image/png,image/jpeg,image/heic,image/heif,image/tiff,text/plain";
 
 const isHidden = (name: string) => name.startsWith(".");
 

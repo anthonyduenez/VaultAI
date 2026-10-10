@@ -7,7 +7,10 @@ import unicodedata
 MAX_DISPLAY_CHARS = 120
 FALLBACK_NAME = "untitled"
 
-EXTENSION_ALIASES = {"jpeg": "jpg", "jpg": "jpg", "tif": "tiff", "tiff": "tiff", "pdf": "pdf", "png": "png", "txt": "txt"}
+EXTENSION_ALIASES = {
+    "jpeg": "jpg", "jpg": "jpg", "tif": "tiff", "tiff": "tiff", "heic": "heic", "heif": "heic", "pdf": "pdf", "png": "png",
+    "txt": "txt",
+}
 
 
 def display_name(raw: str) -> str:

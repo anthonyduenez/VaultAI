@@ -18,7 +18,7 @@ from pathlib import Path
 from vaultai.config import Settings
 
 WORKER = Path(__file__).with_name("worker.py")
-KIND_BY_EXT = {"pdf": "pdf", "png": "image", "jpg": "image", "tiff": "image", "txt": "text"}
+KIND_BY_EXT = {"pdf": "pdf", "png": "image", "jpg": "image", "tiff": "image", "heic": "image", "txt": "text"}
 DPI = 150
 _ENV = {"PATH": os.defpath, "LC_ALL": "C"}
 _MAX_STDOUT = 256 * 1024 * 1024

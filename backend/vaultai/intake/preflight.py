@@ -3,8 +3,8 @@
 Static checks are pure byte inspection: size, an explicit allowlist of
 extensions, magic bytes (client MIME types are ignored), PDF encryption and
 active content, and image dimensions read from headers before any decode.
-The page count comes from the sandboxed parser. Every rejection is a short
-fixed sentence that never repeats file content.
+The page count and HEIC dimensions come from the sandboxed parser. Every
+rejection is a short fixed sentence that never repeats file content.
 """
 
 from __future__ import annotations
@@ -24,7 +24,8 @@ from vaultai.intake.filenames import extension
 from vaultai.parsing import isolate
 from vaultai.parsing.layout import TEXT_LINES_PER_PAGE
 
-MIME = {"pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg", "tiff": "image/tiff", "txt": "text/plain"}
+MIME = {"pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg", "tiff": "image/tiff", "heic": "image/heic",
+        "txt": "text/plain"}
 SIGNATURES: tuple[tuple[str, bytes], ...] = (
     ("pdf", b"%PDF-"),
     ("png", b"\x89PNG\r\n\x1a\n"),
@@ -36,21 +37,26 @@ FOREIGN: tuple[bytes, ...] = (
     b"MZ", b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe", b"PK\x03\x04", b"Rar!",
     b"7z\xbc\xaf", b"\x1f\x8b", b"#!", b"GIF8", b"\xd0\xcf\x11\xe0", b"BM",
 )
+HEVC_BRANDS = frozenset({b"heic", b"heix", b"heim", b"heis", b"hevc", b"hevx"})
+HEIF_BRANDS = frozenset({b"mif1", b"msf1"})
+AVIF_BRANDS = frozenset({b"avif", b"avis"})
 ACTIVE_PDF_NAMES = frozenset({b"JavaScript", b"JS", b"Launch", b"EmbeddedFile", b"EmbeddedFiles", b"RichMedia", b"XFA"})
 MAX_TEXT_BYTES = 2 * 1024 * 1024
 MIN_PRINTABLE = 0.95
 _STREAM_BUDGET = 64 * 1024 * 1024
 _STREAM_MAX = 8 * 1024 * 1024
+_FTYP_MAX = 1024
 
 EMPTY = "The file is empty."
 TOO_LARGE = "The file is larger than the upload limit."
-UNSUPPORTED = "This file type is not supported. Use PDF, PNG, JPEG, TIFF, or plain text."
+UNSUPPORTED = "This file type is not supported. Use PDF, PNG, JPEG, HEIC, TIFF, or plain text."
 SPOOFED = "The file's contents do not match its extension."
 INVALID = {
     "pdf": "The file is not a valid PDF.",
     "png": "The file is not a valid PNG image.",
     "jpg": "The file is not a valid JPEG image.",
     "tiff": "The file is not a valid TIFF image.",
+    "heic": "The file is not a valid HEIC image.",
 }
 NOT_TEXT = "The text file is not valid UTF-8 text."
 TEXT_TOO_LARGE = "Text files are limited to 2 MB."
@@ -80,8 +86,20 @@ class Accepted:
     page_count: int
 
 
+def heif_kind(data: bytes) -> str | None:
+    """'heic' for HEVC-coded HEIF, 'avif' for AVIF, else None. Reads only the brands in the ftyp box."""
+    if data[4:8] != b"ftyp":
+        return None
+    end = min(int.from_bytes(data[:4], "big"), _FTYP_MAX)
+    major = data[8:12]
+    compatible = {data[i:i + 4] for i in range(16, end - 3, 4)}
+    if major in HEVC_BRANDS or (major in HEIF_BRANDS and compatible & HEVC_BRANDS):
+        return "heic"
+    return "avif" if (compatible | {major}) & AVIF_BRANDS else None
+
+
 def sniff(data: bytes) -> str | None:
-    kind = next((k for k, magic in SIGNATURES if data.startswith(magic)), None)
+    kind = next((k for k, magic in SIGNATURES if data.startswith(magic)), None) or heif_kind(data)
     if kind:
         return kind
     return "foreign" if any(data.startswith(m) for m in FOREIGN) else None
@@ -165,6 +183,8 @@ def static_check(settings: Settings, name: str, data: bytes) -> Sniffed | Reject
     if ext is None:
         return Rejected(UNSUPPORTED)
     kind = sniff(data)
+    if kind == "avif":
+        return Rejected(UNSUPPORTED)
     if ext == "txt":
         if kind is not None:
             return Rejected(SPOOFED)

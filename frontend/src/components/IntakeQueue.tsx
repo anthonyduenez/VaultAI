@@ -13,6 +13,7 @@ const MIME_LABEL: Record<string, string> = {
   "application/pdf": "PDF",
   "image/png": "PNG",
   "image/jpeg": "JPEG",
+  "image/heic": "HEIC",
   "image/tiff": "TIFF",
   "text/plain": "TXT",
 };

@@ -4,6 +4,7 @@ python-multipart>=0.0.9
 pydantic>=2.8,<3
 pypdfium2>=4.30,<5
 pillow>=10.4
+pi-heif>=1.1,<2
 openpyxl>=3.1,<4
 httpx>=0.27,<1
 segno>=1.6,<2

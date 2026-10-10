@@ -12,7 +12,7 @@ This is a hackathon entry for the ASUS Local AI Track. It is an MVP, not a produ
 
 | Step | What happens |
 | --- | --- |
-| Capture | Drop files or a folder, feed pages from a scanner, or photograph pages with a phone over the LAN. Bundled fictional samples cover every document type. |
+| Capture | Drop files or a folder (PDF, PNG, JPEG, HEIC, TIFF, or plain text), feed pages from a scanner, or photograph pages with a phone over the LAN. Bundled fictional samples cover every document type. |
 | Preflight | Byte-level checks before anything is stored. Spoofed files, encrypted or active PDFs, decompression bombs, and duplicates are refused. |
 | Parse | A sandboxed subprocess renders pages and reads the text layer. Pages without text go to tesseract OCR, up to four pages at once. |
 | Classify and extract | Rules pick the document type and read the fields for that type. A local model is asked only for what the rules could not read, and every model value must cite and quote a line of the document. |
@@ -263,6 +263,8 @@ Pairing workflow:
 4. The desktop polls the session, imports the assembled PDF with source `phone`, and the Import queue updates.
 
 The link carries a 32-byte random token in the URL fragment, which the browser never sends to a server. The phone sends the token in the `X-Pairing-Token` header. The server stores only its SHA-256, compares in constant time, and the session is single use with a 10-minute expiry (`VAULTAI_PHONE_SESSION_TTL_S`). An unknown, used, expired, or cancelled session returns 404 on every route. EXIF data, including GPS, is dropped when the page is re-encoded. Photos are limited to 20 pages of 12 MB each. The listener is plain HTTP on the LAN. See [SECURITY.md](SECURITY.md) for what that means.
+
+Photos already on an iPhone do not need the listener. AirDrop them to the Mac and drop the HEIC files on **Import & Scan** > **Files & folders**. They take the same path as JPEG photos. Unlike phone capture, the original file is kept as sent, including any location data it carries.
 
 ## Local-only privacy guarantees
 

@@ -56,7 +56,7 @@ export function DropZone({ onFiles, disabled = false }: DropZoneProps) {
     >
       <Upload size={32} strokeWidth={1.5} aria-hidden="true" />
       <p className="dropzone-title">{reading ? "Reading folder…" : "Drop files or whole folders here"}</p>
-      <p className="dropzone-hint">PDF, PNG, JPEG, TIFF, and TXT · subfolders are included · files stay on this device</p>
+      <p className="dropzone-hint">PDF, PNG, JPEG, HEIC, TIFF, and TXT · subfolders are included · files stay on this device</p>
       <div className="row gap-1 center">
         <button type="button" className="btn" disabled={disabled} onClick={() => fileInput.current?.click()}>
           <FilePlus2 size={15} aria-hidden="true" /> Select files
