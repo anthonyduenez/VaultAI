@@ -148,18 +148,27 @@ def read_env_file(path: Path) -> dict[str, str]:
     return out
 
 
-def is_local_host(host: str) -> bool:
-    """True for loopback, RFC1918/ULA private, and link-local hosts. Hostnames other than localhost are not trusted."""
-    if host in {"localhost", "localhost.localdomain"}:
-        return True
+# Explicit networks rather than ipaddress.is_private, which also counts documentation and
+# benchmarking ranges (203.0.113.0/24, 198.18.0.0/15) and the unspecified 0.0.0.0 / ::.
+LOCAL_NETWORKS = tuple(ipaddress.ip_network(n) for n in (
+    "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+    "::1/128", "fc00::/7", "fe80::/10",
+))
+
+
+def is_local_ip(ip: str) -> bool:
     try:
-        ip = ipaddress.ip_address(host.strip("[]"))
+        addr = ipaddress.ip_address(ip.split("%", 1)[0].strip("[]"))
     except ValueError:
         return False
-    # 0.0.0.0 and :: count as "private" to ipaddress but mean every interface.
-    if ip.is_unspecified:
-        return False
-    return ip.is_loopback or ip.is_private or ip.is_link_local
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+        addr = addr.ipv4_mapped
+    return any(addr in net for net in LOCAL_NETWORKS)
+
+
+def is_local_host(host: str) -> bool:
+    """Loopback, RFC 1918, ULA, or link-local. Hostnames other than localhost are not trusted."""
+    return host in {"localhost", "localhost.localdomain"} or is_local_ip(host)
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
