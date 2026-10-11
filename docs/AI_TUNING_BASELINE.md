@@ -19,7 +19,7 @@ Each backend ran on three variants of the 16 bundled documents (13 in `samples/d
 | --- | --- |
 | `text` | the committed PDFs with their text layer |
 | `ocr` | every page rasterized to a 200 dpi grayscale TIFF, so tesseract reads it |
-| `stress` | the committed PDFs with printed labels renamed to synonyms the rules do not know (for example `Invoice Number:` to `Our Reference:`, `Total Due:` to `Balance Payable:`). Values and layout are unchanged. 15 of 16 documents are changed. The list is `STRESS_LABELS` in `vaultai/devtools/evaluation.py`. |
+| `stress` | the committed PDFs with printed labels renamed to synonyms the rules do not know (for example `Invoice Number:` to `Our Reference:`, `Total Due:` to `Balance Payable:`). Values and layout are unchanged. 14 of 16 documents are changed (33 renamings); the agreement letter and the vendor form have no renamed labels. The list is `STRESS_LABELS` in `vaultai/devtools/evaluation.py`. |
 
 The stress set is a held-out check of the model path. Its synonyms must not be added to the rules' aliases.
 
