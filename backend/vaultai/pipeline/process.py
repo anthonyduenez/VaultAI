@@ -198,6 +198,9 @@ class _Model:
         if key is not None and valid:
             with self.ctx.db() as conn:
                 cache.put(conn, key, reply.output)
+        if reply.output is None:
+            with self.run.lock:
+                self.run.issues.append(Issue(IssueCode.MODEL_OUTPUT_REJECTED, grounding.REJECTED))
         return reply.output
 
 
