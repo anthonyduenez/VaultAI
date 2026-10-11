@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>VaultAI · Phone capture</title>
+<style nonce="{{NONCE}}">
+:root {
+  --bg: #f4f6f9; --card: #ffffff; --ink: #121821; --muted: #5d6675; --line: #e2e6ec;
+  --brand: #1d5e8c; --brand-strong: #164a6f; --brand-ink: #ffffff; --soft: #eaf3fa;
+  --ok: #17784a; --err: #b42318; --err-bg: #fdecea; --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 4px 12px rgba(16, 24, 40, .06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --card: #161b23; --ink: #e7ebf1; --muted: #9aa4b4; --line: #29303b;
+    --brand: #5aa8e4; --brand-strong: #7dbbeb; --brand-ink: #08131f; --soft: #132331;
+    --ok: #4bd08b; --err: #ff8a80; --err-bg: #2a1614; --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); }
+body {
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-text-size-adjust: 100%; min-height: 100vh; padding-bottom: calc(112px + env(safe-area-inset-bottom));
+}
+button, label.btn { font: inherit; }
+.top {
+  display: flex; align-items: center; justify-content: space-between; padding: 14px 18px;
+  padding-top: calc(14px + env(safe-area-inset-top)); background: var(--card); border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 5;
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
+.brand svg { width: 28px; height: 28px; }
+.pill { font-size: 13px; color: var(--brand); background: var(--soft); padding: 4px 10px; border-radius: 999px; font-weight: 600; }
+main { max-width: 560px; margin: 0 auto; padding: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); }
+.pairing { text-align: center; }
+.label { margin: 0; color: var(--muted); font-size: 14px; }
+.code { margin: 6px 0 4px; font: 700 40px/1.1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: .12em; }
+.expiry { margin: 0; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.expiry.urgent { color: var(--err); font-weight: 600; }
+.local { display: flex; gap: 10px; align-items: flex-start; margin: 14px 2px; color: var(--muted); font-size: 14px; }
+.local svg { flex: none; width: 18px; height: 18px; margin-top: 2px; color: var(--ok); }
+.empty { text-align: center; color: var(--muted); padding: 28px 12px; border: 2px dashed var(--line); border-radius: 16px; margin: 0 0 14px; }
+.pages { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 12px; }
+.page { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 12px; align-items: center; }
+.thumb-wrap {
+  width: 84px; height: 108px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.thumb-wrap canvas { max-width: 100%; max-height: 100%; }
+.page-info { min-width: 0; }
+.page-title { font-weight: 650; font-size: 17px; margin: 0; }
+.page-notes { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+.tools { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.tool {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 54px;
+  padding: 6px 2px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  font-size: 12px; min-width: 0;
+}
+.tool svg { width: 18px; height: 18px; }
+.tool:disabled { opacity: .35; }
+.tool.danger { color: var(--err); }
+.chip { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 6px 14px; font-size: 14px; }
+.btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 52px; border-radius: 14px;
+  border: 1px solid transparent; font-weight: 650; font-size: 17px; cursor: pointer; text-align: center;
+}
+.btn svg { width: 20px; height: 20px; }
+.btn.primary { background: var(--brand); color: var(--brand-ink); }
+.btn.primary:active { background: var(--brand-strong); }
+.btn.secondary { background: var(--card); color: var(--brand); border-color: var(--brand); }
+.btn:disabled, .btn.disabled { opacity: .45; pointer-events: none; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+.dock {
+  position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line);
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); z-index: 6;
+}
+.dock-inner { max-width: 560px; margin: 0 auto; display: grid; gap: 8px; }
+.progress { height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.progress div { height: 100%; width: 0; background: var(--brand); transition: width .2s ease; }
+.message { margin: 0; font-size: 14px; color: var(--muted); text-align: center; min-height: 1em; }
+.message.error { color: var(--err); background: var(--err-bg); border-radius: 10px; padding: 8px 10px; }
+.state { text-align: center; padding: 32px 20px; }
+.state svg { width: 56px; height: 56px; }
+.state h2 { margin: 12px 0 6px; font-size: 22px; }
+.state p { margin: 0; color: var(--muted); }
+.state.ok svg { color: var(--ok); }
+.state.gone svg { color: var(--muted); }
+.editor {
+  position: fixed; inset: 0; background: var(--bg); z-index: 10; display: flex; flex-direction: column;
+  padding: calc(12px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+}
+.editor-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.editor-head h2 { margin: 0; font-size: 18px; }
+.stage { flex: 1; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.stage canvas { max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: 8px; }
+.sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin: 14px 0; }
+.sliders label { font-size: 13px; color: var(--muted); display: grid; gap: 2px; }
+.sliders input { width: 100%; accent-color: var(--brand); }
+.row { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="26" height="22" rx="5" fill="#1d5e8c"/><circle cx="16" cy="16" r="6.5" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M16 9.5v3M16 19.5v3M9.5 16h3M19.5 16h3" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>
+    <span>VaultAI</span>
+  </div>
+  <span class="pill">Phone capture</span>
+</header>
+
+<main>
+  <section id="pairing" class="card pairing" aria-live="polite">
+    <p class="label">Check that this code matches your desktop</p>
+    <p id="code" class="code" aria-label="Pairing code">··· ···</p>
+    <p id="expiry" class="expiry">Connecting to VaultAI…</p>
+  </section>
+
+  <p id="local" class="local">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+    <span>Stays on your local network. Photos go straight to your VaultAI computer, never to the internet or a cloud service.</span>
+  </p>
+
+  <section id="capture">
+    <p id="empty" class="empty">Take one photo per page. Lay the page flat in good light and fill the frame.</p>
+    <ol id="pages" class="pages" aria-label="Captured pages"></ol>
+    <label id="add-label" class="btn secondary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+      <span id="add-text">Take photo of page 1</span>
+      <input id="add" class="visually-hidden" type="file" accept="image/jpeg,image/png" capture="environment">
+    </label>
+  </section>
+
+  <section id="done" class="card state ok" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m7.5 12.5 3 3 6-6"/></svg>
+    <h2>Sent to VaultAI</h2>
+    <p id="done-text">Your pages are on your VaultAI desktop. You can close this page.</p>
+  </section>
+
+  <section id="gone" class="card state gone" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 7v6M12 16.5v.5"/></svg>
+    <h2>This link is no longer valid</h2>
+    <p>It expired, was used, or was cancelled. Start a new phone capture on your VaultAI desktop and scan the new code.</p>
+  </section>
+</main>
+
+<div id="dock" class="dock">
+  <div class="dock-inner">
+    <div id="progress" class="progress" hidden><div id="bar"></div></div>
+    <p id="message" class="message" role="status" aria-live="polite"></p>
+    <button id="send" class="btn primary" type="button" disabled>Send pages to VaultAI</button>
+  </div>
+</div>
+
+<section id="editor" class="editor" hidden aria-modal="true" role="dialog" aria-labelledby="editor-title">
+  <div class="editor-head">
+    <h2 id="editor-title">Crop page</h2>
+    <button id="crop-reset" class="chip" type="button">Reset</button>
+  </div>
+  <div class="stage"><canvas id="crop-canvas"></canvas></div>
+  <div class="sliders">
+    <label>Left <input id="crop-l" type="range" min="0" max="45" step="1" value="0"></label>
+    <label>Right <input id="crop-r" type="range" min="0" max="45" step="1" value="0"></label>
+    <label>Top <input id="crop-t" type="range" min="0" max="45" step="1" value="0"></label>
+    <label>Bottom <input id="crop-b" type="range" min="0" max="45" step="1" value="0"></label>
+  </div>
+  <div class="row">
+    <button id="crop-cancel" class="btn secondary" type="button">Cancel</button>
+    <button id="crop-done" class="btn primary" type="button">Done</button>
+  </div>
+</section>
+
+<input id="retake" class="visually-hidden" type="file" accept="image/jpeg,image/png" capture="environment">
+
+<script nonce="{{NONCE}}">
+(() => {
+  "use strict";
+  const MAX_EDGE = 2400;
+  const THUMB_EDGE = 720;
+  const $ = (id) => document.getElementById(id);
+  const sessionId = location.pathname.split("/").filter(Boolean).pop() || "";
+  const token = location.hash.slice(1);
+  history.replaceState(null, "", location.pathname);
+
+  const state = { pages: [], maxPages: 20, expiresAt: 0, skew: 0, sending: false, finished: false, retakeAt: -1 };
+  const editor = { index: -1, insets: null };
+  let nextId = 1;
+  let timer = 0;
+
+  const ICONS = {
+    rotate: "M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7",
+    crop: "M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2",
+    up: "M12 19V5M5 12l7-7 7 7",
+    down: "M12 5v14M19 12l-7 7-7-7",
+    retake: "M4 8h3l2-3h6l2 3h3v11H4zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z",
+    trash: "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
+  };
+
+  function icon(name) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", ICONS[name]);
+    svg.appendChild(path);
+    return svg;
+  }
+
+  function setMessage(text, kind) {
+    const el = $("message");
+    el.textContent = text || "";
+    el.className = "message" + (kind === "error" ? " error" : "");
+  }
+
+  function setProgress(fraction) {
+    $("progress").hidden = fraction === null;
+    $("bar").style.width = `${Math.round((fraction || 0) * 100)}%`;
+  }
+
+  function showGone() {
+    clearInterval(timer);
+    state.finished = true;
+    for (const id of ["pairing", "local", "capture", "dock"]) $(id).hidden = true;
+    $("gone").hidden = false;
+  }
+
+  function showDone(pageCount) {
+    clearInterval(timer);
+    state.finished = true;
+    state.pages = [];
+    for (const id of ["pairing", "capture", "dock"]) $(id).hidden = true;
+    $("done-text").textContent = `${pageCount} ${pageCount === 1 ? "page is" : "pages are"} on your VaultAI desktop, ready for review. You can close this page.`;
+    $("done").hidden = false;
+  }
+
+  function tick() {
+    if (state.finished) return;
+    const left = state.expiresAt - (Date.now() + state.skew);
+    if (left <= 0) return showGone();
+    const minutes = Math.floor(left / 60000);
+    const seconds = Math.floor(left / 1000) % 60;
+    const el = $("expiry");
+    el.textContent = `Link expires in ${minutes}:${String(seconds).padStart(2, "0")}`;
+    el.classList.toggle("urgent", left < 60000);
+  }
+
+  async function loadStatus() {
+    if (!token || !sessionId) return showGone();
+    let response;
+    try {
+      response = await fetch(`/p/${encodeURIComponent(sessionId)}/status`, {
+        headers: { "X-Pairing-Token": token }, cache: "no-store", credentials: "omit",
+      });
+    } catch {
+      $("expiry").textContent = "Could not reach VaultAI.";
+      return setMessage("Check that this phone is on the same Wi-Fi network as the VaultAI computer.", "error");
+    }
+    if (!response.ok) return showGone();
+    const data = await response.json();
+    const serverNow = Date.parse(response.headers.get("Date") || "");
+    state.skew = Number.isNaN(serverNow) ? 0 : serverNow - Date.now();
+    state.expiresAt = Date.parse(data.expires_at);
+    state.maxPages = data.max_pages;
+    $("code").textContent = String(data.code).replace(/^(\d{3})(\d{3})$/, "$1 $2");
+    tick();
+    timer = setInterval(tick, 1000);
+    render();
+  }
+
+  function loadImage(blob) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("That photo could not be read. Try again.")); };
+      img.src = url;
+    });
+  }
+
+  function scaled(img, edge) {
+    const scale = Math.min(1, edge / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  }
+
+  async function preparePage(file) {
+    const img = await loadImage(file);
+    const full = scaled(img, MAX_EDGE);
+    const blob = await new Promise((resolve, reject) =>
+      full.toBlob((b) => (b ? resolve(b) : reject(new Error("That photo could not be prepared."))), "image/jpeg", 0.88));
+    return { id: nextId++, blob, thumb: scaled(img, THUMB_EDGE), rotation: 0, insets: { l: 0, t: 0, r: 0, b: 0 } };
+  }
+
+  function rotatedCanvas(page) {
+    const src = page.thumb;
+    const quarter = page.rotation % 180 !== 0;
+    const canvas = document.createElement("canvas");
+    canvas.width = quarter ? src.height : src.width;
+    canvas.height = quarter ? src.width : src.height;
+    const g = canvas.getContext("2d");
+    g.translate(canvas.width / 2, canvas.height / 2);
+    g.rotate((page.rotation * Math.PI) / 180);
+    g.drawImage(src, -src.width / 2, -src.height / 2);
+    return canvas;
+  }
+
+  function drawFinal(target, page) {
+    const full = rotatedCanvas(page);
+    const { l, t, r, b } = page.insets;
+    const sx = l * full.width, sy = t * full.height;
+    const sw = (1 - l - r) * full.width, sh = (1 - t - b) * full.height;
+    target.width = Math.round(sw);
+    target.height = Math.round(sh);
+    target.getContext("2d").drawImage(full, sx, sy, sw, sh, 0, 0, target.width, target.height);
+  }
+
+  function drawCropEditor() {
+    const page = state.pages[editor.index];
+    const preview = { ...page, insets: editor.insets };
+    const full = rotatedCanvas(preview);
+    const canvas = $("crop-canvas");
+    canvas.width = full.width;
+    canvas.height = full.height;
+    const g = canvas.getContext("2d");
+    g.drawImage(full, 0, 0);
+    const { l, t, r, b } = editor.insets;
+    const x = l * full.width, y = t * full.height;
+    const w = (1 - l - r) * full.width, h = (1 - t - b) * full.height;
+    g.fillStyle = "rgba(8, 14, 24, 0.55)";
+    g.beginPath();
+    g.rect(0, 0, full.width, full.height);
+    g.rect(x, y, w, h);
+    g.fill("evenodd");
+    g.strokeStyle = "#5aa8e4";
+    g.lineWidth = Math.max(2, full.width / 200);
+    g.strokeRect(x, y, w, h);
+  }
+
+  function hasCrop(page) {
+    const { l, t, r, b } = page.insets;
+    return l + t + r + b > 0;
+  }
+
+  function button(label, iconName, onClick, opts = {}) {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "tool" + (opts.danger ? " danger" : "");
+    el.disabled = Boolean(opts.disabled);
+    el.setAttribute("aria-label", opts.aria || label);
+    el.appendChild(icon(iconName));
+    if (opts.text !== false) el.appendChild(document.createTextNode(label));
+    el.addEventListener("click", onClick);
+    return el;
+  }
+
+  function render() {
+    const list = $("pages");
+    list.replaceChildren();
+    state.pages.forEach((page, i) => {
+      const item = document.createElement("li");
+      item.className = "card page";
+      const wrap = document.createElement("div");
+      wrap.className = "thumb-wrap";
+      const canvas = document.createElement("canvas");
+      drawFinal(canvas, page);
+      wrap.appendChild(canvas);
+      const info = document.createElement("div");
+      info.className = "page-info";
+      const title = document.createElement("p");
+      title.className = "page-title";
+      title.textContent = `Page ${i + 1}`;
+      const notes = document.createElement("p");
+      notes.className = "page-notes";
+      const edits = [page.rotation ? `Rotated ${page.rotation}°` : "", hasCrop(page) ? "Cropped" : ""].filter(Boolean);
+      notes.textContent = edits.length ? edits.join(" · ") : "As photographed";
+      info.append(title, notes);
+      const tools = document.createElement("div");
+      tools.className = "tools";
+      const n = i + 1;
+      tools.append(
+        button("Rotate", "rotate", () => rotate(i), { aria: `Rotate page ${n}` }),
+        button("Crop", "crop", () => openEditor(i), { aria: `Crop page ${n}` }),
+        button("Retake", "retake", () => retake(i), { aria: `Retake page ${n}` }),
+        button("Up", "up", () => move(i, -1), { aria: `Move page ${n} up`, disabled: i === 0 }),
+        button("Down", "down", () => move(i, 1), { aria: `Move page ${n} down`, disabled: i === state.pages.length - 1 }),
+        button("Delete", "trash", () => remove(i), { aria: `Delete page ${n}`, danger: true }),
+      );
+      item.append(wrap, info, tools);
+      list.appendChild(item);
+    });
+    const count = state.pages.length;
+    $("empty").hidden = count > 0;
+    const full = count >= state.maxPages;
+    $("add-label").classList.toggle("disabled", full || state.sending);
+    $("add").disabled = full || state.sending;
+    $("add-text").textContent = full ? `Page limit reached (${state.maxPages})` : `Take photo of page ${count + 1}`;
+    const send = $("send");
+    send.disabled = count === 0 || state.sending;
+    send.textContent = state.sending ? "Sending…" : count ? `Send ${count} ${count === 1 ? "page" : "pages"} to VaultAI` : "Send pages to VaultAI";
+  }
+
+  function rotate(i) {
+    const page = state.pages[i];
+    const { l, t, r, b } = page.insets;
+    page.rotation = (page.rotation + 90) % 360;
+    page.insets = { l: b, t: l, r: t, b: r };
+    render();
+  }
+
+  function move(i, delta) {
+    const j = i + delta;
+    if (j < 0 || j >= state.pages.length) return;
+    [state.pages[i], state.pages[j]] = [state.pages[j], state.pages[i]];
+    render();
+  }
+
+  function remove(i) {
+    state.pages.splice(i, 1);
+    setMessage("");
+    render();
+  }
+
+  function retake(i) {
+    state.retakeAt = i;
+    $("retake").click();
+  }
+
+  async function takePhoto(input, replaceAt) {
+    const file = input.files && input.files[0];
+    input.value = "";
+    if (!file) return;
+    setMessage("Preparing photo…");
+    try {
+      const page = await preparePage(file);
+      if (replaceAt >= 0 && replaceAt < state.pages.length) state.pages[replaceAt] = page;
+      else if (state.pages.length < state.maxPages) state.pages.push(page);
+      setMessage("");
+    } catch (err) {
+      setMessage(err.message, "error");
+    }
+    render();
+  }
+
+  function openEditor(i) {
+    editor.index = i;
+    editor.insets = { ...state.pages[i].insets };
+    for (const side of ["l", "t", "r", "b"]) $(`crop-${side}`).value = String(Math.round(editor.insets[side] * 100));
+    $("editor").hidden = false;
+    drawCropEditor();
+  }
+
+  function closeEditor(save) {
+    if (save) state.pages[editor.index].insets = { ...editor.insets };
+    $("editor").hidden = true;
+    editor.index = -1;
+    render();
+  }
+
+  function editsPayload() {
+    return state.pages.map((page) => {
+      const { l, t, r, b } = page.insets;
+      const crop = hasCrop(page) ? [l, t, 1 - r, 1 - b].map((v) => Math.round(v * 10000) / 10000) : null;
+      return { rotation: page.rotation, crop };
+    });
+  }
+
+  function send() {
+    if (!state.pages.length || state.sending) return;
+    state.sending = true;
+    render();
+    setMessage("Sending over your local network…");
+    setProgress(0);
+    const form = new FormData();
+    form.append("edits", JSON.stringify(editsPayload()));
+    state.pages.forEach((page, i) => form.append("pages", page.blob, `page-${i + 1}.jpg`));
+    const pageCount = state.pages.length;
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/p/${encodeURIComponent(sessionId)}/submit`);
+    xhr.setRequestHeader("X-Pairing-Token", token);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) setProgress((e.loaded / e.total) * 0.9); };
+    xhr.onload = () => {
+      state.sending = false;
+      setProgress(null);
+      let body = null;
+      try { body = JSON.parse(xhr.responseText); } catch { body = null; }
+      if (xhr.status === 404) return showGone();
+      if (xhr.status === 200 && body && body.preflight === "accepted") return showDone(pageCount);
+      const reason = body && (body.error || body.message);
+      setMessage(reason ? `VaultAI could not accept these pages: ${reason}` : "Sending failed. Try again.", "error");
+      render();
+    };
+    xhr.onerror = () => {
+      state.sending = false;
+      setProgress(null);
+      setMessage("The upload was interrupted. Check the Wi-Fi connection and try again.", "error");
+      render();
+    };
+    xhr.send(form);
+  }
+
+  $("add").addEventListener("change", (e) => takePhoto(e.target, -1));
+  $("retake").addEventListener("change", (e) => { const at = state.retakeAt; state.retakeAt = -1; takePhoto(e.target, at); });
+  $("send").addEventListener("click", send);
+  for (const side of ["l", "t", "r", "b"]) {
+    $(`crop-${side}`).addEventListener("input", (e) => {
+      editor.insets[side] = Number(e.target.value) / 100;
+      drawCropEditor();
+    });
+  }
+  $("crop-reset").addEventListener("click", () => {
+    editor.insets = { l: 0, t: 0, r: 0, b: 0 };
+    for (const side of ["l", "t", "r", "b"]) $(`crop-${side}`).value = "0";
+    drawCropEditor();
+  });
+  $("crop-cancel").addEventListener("click", () => closeEditor(false));
+  $("crop-done").addEventListener("click", () => closeEditor(true));
+  window.addEventListener("beforeunload", (e) => {
+    if (state.pages.length && !state.finished) e.preventDefault();
+  });
+
+  render();
+  loadStatus();
+})();
+</script>
+</body>
+</html>

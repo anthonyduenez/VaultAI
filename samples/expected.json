@@ -1,0 +1,712 @@
+{
+  "demo/check_4521_northwind.pdf": {
+    "doc_type": "check",
+    "fields": {
+      "payer": "Harborview Logistics LLC",
+      "bank_name": "First Coastal Bank",
+      "payee": "Northwind Office Supply Co.",
+      "amount": "1250.00",
+      "amount_written": "One thousand two hundred fifty and 00/100 DOLLARS",
+      "currency": "USD",
+      "date": "2026-10-02",
+      "check_number": "4521",
+      "routing_number": "021000021",
+      "account_number": "000123456789",
+      "memo": "Invoice NW-88213 office chairs",
+      "signature_present": "true"
+    },
+    "expected_issue_codes": [],
+    "expected_status": "ready"
+  },
+  "demo/receipt_cornerstone_office_mart.pdf": {
+    "doc_type": "receipt",
+    "fields": {
+      "merchant": "CORNERSTONE OFFICE MART",
+      "merchant_address": "1880 Atlantic Blvd, Long Beach, CA 90806",
+      "receipt_number": "R-0217-55810",
+      "date": "2026-10-03",
+      "subtotal": "189.73",
+      "tax": "18.02",
+      "total": "207.75",
+      "currency": "USD",
+      "payment_method": "VISA ****4417"
+    },
+    "line_items": [
+      [
+        "Printer paper 10-ream case",
+        "2",
+        "42.99",
+        "85.98"
+      ],
+      [
+        "Toner cartridge 26A",
+        "1",
+        "89.50",
+        "89.50"
+      ],
+      [
+        "Desk organizer",
+        "1",
+        "14.25",
+        "14.25"
+      ]
+    ],
+    "expected_issue_codes": [],
+    "expected_status": "approved"
+  },
+  "demo/invoice_acme_INV-2026-0142.pdf": {
+    "doc_type": "invoice",
+    "fields": {
+      "vendor": "Acme Industrial Supply, Inc.",
+      "vendor_address": "2250 Foundry Road, Fresno, CA 93721",
+      "invoice_number": "INV-2026-0142",
+      "invoice_date": "2026-09-28",
+      "due_date": "2026-10-28",
+      "bill_to": "Harborview Logistics LLC",
+      "po_number": "PO-77310",
+      "payment_terms": "Net 30",
+      "subtotal": "4850.00",
+      "tax": "388.00",
+      "total": "5328.00",
+      "currency": "USD"
+    },
+    "line_items": [
+      [
+        "Pallet racking beam 96in",
+        "20",
+        "145.00",
+        "2900.00"
+      ],
+      [
+        "Wire mesh deck 42x46",
+        "30",
+        "48.50",
+        "1455.00"
+      ],
+      [
+        "Installation labor (hours)",
+        "6",
+        "82.50",
+        "495.00"
+      ]
+    ],
+    "expected_issue_codes": [
+      "amount_mismatch"
+    ],
+    "expected_status": "needs_review"
+  },
+  "demo/invoice_pinecrest_PFS-10388.pdf": {
+    "doc_type": "invoice",
+    "fields": {
+      "vendor": "Pinecrest Facilities Services LLC",
+      "vendor_address": "77 Orchard Lane, Torrance, CA 90501",
+      "invoice_number": "PFS-10388",
+      "invoice_date": "2026-10-01",
+      "due_date": "2026-10-31",
+      "bill_to": "Harborview Logistics LLC",
+      "payment_terms": "Net 30",
+      "subtotal": "3050.00",
+      "tax": "0.00",
+      "total": "3050.00",
+      "currency": "USD"
+    },
+    "line_items": [
+      [
+        "Monthly janitorial service - October",
+        "1",
+        "2400.00",
+        "2400.00"
+      ],
+      [
+        "Exterior window cleaning",
+        "1",
+        "650.00",
+        "650.00"
+      ]
+    ],
+    "expected_issue_codes": [],
+    "expected_status": "ready"
+  },
+  "demo/contract_msa_brightpath.pdf": {
+    "doc_type": "contract",
+    "fields": {
+      "title": "Master Services Agreement",
+      "parties": "Brightpath Data Services, Inc.; Harborview Logistics LLC",
+      "effective_date": "2026-01-01",
+      "expiration_date": "2026-12-31",
+      "auto_renewal": "true",
+      "notice_period": "60 days",
+      "renewal_notice_deadline": "2026-11-01",
+      "contract_value": "12500.00",
+      "currency": "USD",
+      "governing_law": "Delaware",
+      "signatories": "Daniel Okafor; Jordan Ellis",
+      "signature_status": "partially_signed"
+    },
+    "expected_issue_codes": [
+      "missing_signature",
+      "auto_renewal",
+      "risky_clause",
+      "ambiguous_clause"
+    ],
+    "expected_status": "needs_review",
+    "obligations": [
+      {
+        "kind": "notice",
+        "due_date": "2026-11-01",
+        "party": "Either party",
+        "description": "Give written notice of non-renewal at least 60 days before the term ends"
+      },
+      {
+        "kind": "expiration",
+        "due_date": "2026-12-31",
+        "party": null,
+        "description": "Initial term ends; renews for 12 months unless notice is given"
+      },
+      {
+        "kind": "payment",
+        "due_date": null,
+        "party": "Harborview Logistics LLC",
+        "description": "Pay the $12,500.00 monthly subscription fee within 30 days of each invoice"
+      },
+      {
+        "kind": "obligation",
+        "due_date": null,
+        "party": "Brightpath Data Services, Inc.",
+        "description": "Notify Client of a security breach within 72 hours of discovery"
+      },
+      {
+        "kind": "obligation",
+        "due_date": null,
+        "party": "Brightpath Data Services, Inc.",
+        "description": "Maintain commercial general liability insurance of at least $2,000,000 per occurrence"
+      },
+      {
+        "kind": "obligation",
+        "due_date": null,
+        "party": "Brightpath Data Services, Inc.",
+        "description": "Maintain SOC 2 Type II certification"
+      },
+      {
+        "kind": "obligation",
+        "due_date": null,
+        "party": "Brightpath Data Services, Inc.",
+        "description": "Maintain 99.9% monthly platform availability"
+      },
+      {
+        "kind": "obligation",
+        "due_date": null,
+        "party": "Harborview Logistics LLC",
+        "description": "Do not solicit or hire Provider employees during the term and for 12 months after"
+      },
+      {
+        "kind": "signature",
+        "due_date": null,
+        "party": "Harborview Logistics LLC",
+        "description": "Client signature block is blank"
+      }
+    ],
+    "risky_clause_kinds": [
+      "liability",
+      "indemnity",
+      "non_compete",
+      "termination"
+    ]
+  },
+  "demo/agreement_letter_chen_advisory.pdf": {
+    "doc_type": "agreement_letter",
+    "fields": {
+      "sender": "Maya Chen",
+      "sender_organization": "Chen Advisory Group",
+      "recipient": "Jordan Ellis",
+      "recipient_organization": "Harborview Logistics LLC",
+      "letter_date": "2026-10-06",
+      "subject": "Engagement Letter - Warehouse Operations Assessment",
+      "compensation": "8000.00",
+      "currency": "USD",
+      "acceptance_deadline": "2026-10-24",
+      "signature_status": "unsigned"
+    },
+    "expected_issue_codes": [
+      "missing_signature"
+    ],
+    "expected_status": "needs_review",
+    "obligations": [
+      {
+        "kind": "deliverable",
+        "due_date": "2026-11-20",
+        "party": "Chen Advisory Group",
+        "description": "Deliver the written assessment report with recommendations"
+      },
+      {
+        "kind": "signature",
+        "due_date": "2026-10-24",
+        "party": "Harborview Logistics LLC",
+        "description": "Sign and return the engagement letter"
+      },
+      {
+        "kind": "obligation",
+        "due_date": "2026-10-20",
+        "party": "Harborview Logistics LLC",
+        "description": "Grant site access for the assessment"
+      },
+      {
+        "kind": "payment",
+        "due_date": null,
+        "party": "Harborview Logistics LLC",
+        "description": "Pay the $8,000.00 fixed fee: 50% on acceptance, balance within 15 days of the final report"
+      }
+    ],
+    "risky_clause_kinds": []
+  },
+  "demo/invoice_quickship_QS-55021.pdf": {
+    "doc_type": "invoice",
+    "fields": {
+      "vendor": "QuickShip Freight Partners",
+      "vendor_address": "5100 Cargo Way, Ontario, CA 91761",
+      "invoice_number": "QS-55021",
+      "invoice_date": "2026-10-05",
+      "due_date": "2026-10-12",
+      "bill_to": "Harborview Logistics LLC",
+      "payment_terms": "Net 7",
+      "subtotal": "2194.00",
+      "tax": "0.00",
+      "total": "2194.00",
+      "currency": "USD"
+    },
+    "line_items": [
+      [
+        "Expedited freight LA to PHX",
+        "1",
+        "1980.00",
+        "1980.00"
+      ],
+      [
+        "Fuel surcharge",
+        "1",
+        "214.00",
+        "214.00"
+      ]
+    ],
+    "expected_issue_codes": [
+      "prompt_injection",
+      "hidden_text"
+    ],
+    "expected_status": "needs_review"
+  },
+  "demo/purchase_order_PO-77310.pdf": {
+    "doc_type": "purchase_order",
+    "fields": {
+      "po_number": "PO-77310",
+      "buyer": "Harborview Logistics LLC",
+      "vendor": "Acme Industrial Supply, Inc.",
+      "order_date": "2026-09-15",
+      "delivery_date": "2026-10-15",
+      "ship_to": "Harborview Logistics LLC - Long Beach DC, 410 Pier Avenue, Long Beach, CA 90802",
+      "payment_terms": "Net 30",
+      "subtotal": "4355.00",
+      "tax": "348.40",
+      "total": "4703.40",
+      "currency": "USD"
+    },
+    "line_items": [
+      [
+        "Pallet racking beam 96in",
+        "20",
+        "145.00",
+        "2900.00"
+      ],
+      [
+        "Wire mesh deck 42x46",
+        "30",
+        "48.50",
+        "1455.00"
+      ]
+    ],
+    "expected_issue_codes": [],
+    "expected_status": "ready"
+  },
+  "demo/sow_brightpath_onboarding.pdf": {
+    "doc_type": "statement_of_work",
+    "fields": {
+      "title": "Statement of Work No. 1 - Platform Onboarding",
+      "client": "Harborview Logistics LLC",
+      "provider": "Brightpath Data Services, Inc.",
+      "effective_date": "2026-02-01",
+      "end_date": "2026-04-30",
+      "total": "18000.00",
+      "currency": "USD",
+      "payment_terms": "50% at signing and 50% at completion",
+      "signature_status": "signed"
+    },
+    "expected_issue_codes": [],
+    "expected_status": "ready",
+    "obligations": [
+      {
+        "kind": "deliverable",
+        "due_date": "2026-02-20",
+        "party": "Brightpath Data Services, Inc.",
+        "description": "Data integration design document"
+      },
+      {
+        "kind": "deliverable",
+        "due_date": "2026-03-31",
+        "party": "Brightpath Data Services, Inc.",
+        "description": "Telematics feed integration"
+      },
+      {
+        "kind": "deliverable",
+        "due_date": "2026-04-15",
+        "party": "Brightpath Data Services, Inc.",
+        "description": "User training (2 sessions)"
+      },
+      {
+        "kind": "payment",
+        "due_date": null,
+        "party": "Harborview Logistics LLC",
+        "description": "Pay the $18,000.00 fixed fee: 50% at signing, 50% at completion"
+      }
+    ],
+    "risky_clause_kinds": []
+  },
+  "demo/quote_coastal_air_Q-2291.pdf": {
+    "doc_type": "proposal",
+    "fields": {
+      "quote_number": "Q-2291",
+      "vendor": "Coastal Air Mechanical Inc.",
+      "client": "Harborview Logistics LLC",
+      "date": "2026-10-01",
+      "valid_until": "2026-10-31",
+      "subtotal": "2756.00",
+      "tax": "0.00",
+      "total": "2756.00",
+      "currency": "USD"
+    },
+    "line_items": [
+      [
+        "Rooftop HVAC unit service",
+        "2",
+        "1150.00",
+        "2300.00"
+      ],
+      [
+        "MERV-13 filter replacement",
+        "12",
+        "38.00",
+        "456.00"
+      ]
+    ],
+    "expected_issue_codes": [],
+    "expected_status": "ready"
+  },
+  "demo/policy_travel_expense_FIN-104.pdf": {
+    "doc_type": "policy",
+    "fields": {
+      "title": "Travel and Expense Reimbursement Policy",
+      "policy_number": "FIN-104",
+      "version": "3.2",
+      "owner": "Finance Department",
+      "effective_date": "2026-07-01",
+      "review_date": "2027-06-30"
+    },
+    "expected_issue_codes": [],
+    "expected_status": "ready",
+    "obligations": [
+      {
+        "kind": "obligation",
+        "due_date": null,
+        "party": "Employees",
+        "description": "Employees must submit expense reports within 30 days of incurring the expense"
+      },
+      {
+        "kind": "obligation",
+        "due_date": null,
+        "party": "Employees",
+        "description": "Receipts are required for any single expense over $75.00"
+      },
+      {
+        "kind": "obligation",
+        "due_date": null,
+        "party": "Employees",
+        "description": "Airfare must be booked in economy class at least 14 days before travel when possible"
+      }
+    ],
+    "risky_clause_kinds": []
+  },
+  "demo/memo_forklift_recertification.pdf": {
+    "doc_type": "correspondence",
+    "fields": {
+      "sender": "Priya Natarajan, Safety Manager",
+      "recipient": "All Warehouse Staff",
+      "date": "2026-10-07",
+      "subject": "Forklift Operator Recertification"
+    },
+    "expected_issue_codes": [],
+    "expected_status": "ready",
+    "obligations": [
+      {
+        "kind": "obligation",
+        "due_date": "2026-11-15",
+        "party": "All Warehouse Staff",
+        "description": "Complete forklift recertification training"
+      }
+    ]
+  },
+  "demo/form_vendor_registration_VR-2.pdf": {
+    "doc_type": "admin_form",
+    "fields": {
+      "form_title": "Vendor Registration Form",
+      "form_number": "VR-2",
+      "submitted_by": "Coastal Air Mechanical Inc.",
+      "date": "2026-09-30",
+      "signature_present": "true"
+    },
+    "expected_issue_codes": [],
+    "expected_status": "ready"
+  },
+  "scanner/receipt_harbor_fuel.pdf": {
+    "doc_type": "receipt",
+    "fields": {
+      "merchant": "HARBOR FUEL & MART",
+      "merchant_address": "2101 Harbor Way, Long Beach, CA 90813",
+      "receipt_number": "HF-30981",
+      "date": "2026-10-08",
+      "subtotal": "61.40",
+      "tax": "0.00",
+      "total": "61.40",
+      "currency": "USD",
+      "payment_method": "DEBIT ****2290"
+    },
+    "line_items": [
+      [
+        "Unleaded 87 - Pump 4",
+        "10.000",
+        "4.84",
+        "48.40"
+      ],
+      [
+        "Car wash - Basic",
+        "1",
+        "11.00",
+        "11.00"
+      ],
+      [
+        "Tire air",
+        "1",
+        "2.00",
+        "2.00"
+      ]
+    ],
+    "expected_issue_codes": [],
+    "expected_status": "approved"
+  },
+  "scanner/check_4522_pinecrest.pdf": {
+    "doc_type": "check",
+    "fields": {
+      "payer": "Harborview Logistics LLC",
+      "bank_name": "First Coastal Bank",
+      "payee": "Pinecrest Facilities Services LLC",
+      "amount": "3050.00",
+      "amount_written": "Three thousand fifty and 00/100 DOLLARS",
+      "currency": "USD",
+      "date": "2026-10-09",
+      "check_number": "4522",
+      "routing_number": "021000021",
+      "account_number": "000123456789",
+      "memo": "Invoice PFS-10388",
+      "signature_present": "true"
+    },
+    "expected_issue_codes": [],
+    "expected_status": "ready"
+  },
+  "scanner/invoice_two_page_tidewater.pdf": {
+    "doc_type": "invoice",
+    "fields": {
+      "vendor": "Tidewater Pallet Co.",
+      "vendor_address": "615 Terminal Way, San Pedro, CA 90731",
+      "invoice_number": "TW-7781",
+      "invoice_date": "2026-10-04",
+      "due_date": "2026-11-03",
+      "bill_to": "Harborview Logistics LLC",
+      "payment_terms": "Net 30",
+      "subtotal": "10875.20",
+      "tax": "1033.14",
+      "total": "11908.34",
+      "currency": "USD"
+    },
+    "line_items": [
+      [
+        "GMA 48x40 pallet, Grade A",
+        "120",
+        "9.75",
+        "1170.00"
+      ],
+      [
+        "GMA 48x40 pallet, Grade B",
+        "200",
+        "6.50",
+        "1300.00"
+      ],
+      [
+        "Heat-treated 48x40 pallet (ISPM-15)",
+        "80",
+        "12.40",
+        "992.00"
+      ],
+      [
+        "Block pallet 48x48, 4-way",
+        "40",
+        "14.25",
+        "570.00"
+      ],
+      [
+        "Euro pallet 1200x800",
+        "30",
+        "16.80",
+        "504.00"
+      ],
+      [
+        "Plastic pallet 48x40, nestable",
+        "25",
+        "38.00",
+        "950.00"
+      ],
+      [
+        "Pallet repair - board replacement",
+        "60",
+        "3.25",
+        "195.00"
+      ],
+      [
+        "Pallet repair - stringer plug",
+        "45",
+        "2.10",
+        "94.50"
+      ],
+      [
+        "Corner board 2x2x48",
+        "500",
+        "0.42",
+        "210.00"
+      ],
+      [
+        "Slip sheet 48x40, 0.030in",
+        "300",
+        "0.95",
+        "285.00"
+      ],
+      [
+        "Top frame 48x40",
+        "20",
+        "11.50",
+        "230.00"
+      ],
+      [
+        "Pallet collar 1200x800",
+        "24",
+        "18.75",
+        "450.00"
+      ],
+      [
+        "Stretch wrap 18in x 1500ft",
+        "36",
+        "21.90",
+        "788.40"
+      ],
+      [
+        "Poly strapping kit",
+        "6",
+        "64.00",
+        "384.00"
+      ],
+      [
+        "Printed pallet tags (pack of 500)",
+        "4",
+        "27.50",
+        "110.00"
+      ],
+      [
+        "Custom crate 60x40x36",
+        "3",
+        "145.00",
+        "435.00"
+      ],
+      [
+        "Skid 36x36, 2-way",
+        "50",
+        "7.20",
+        "360.00"
+      ],
+      [
+        "Half pallet 48x20",
+        "40",
+        "5.60",
+        "224.00"
+      ],
+      [
+        "Deck board 1x6x48, kiln dried",
+        "150",
+        "1.85",
+        "277.50"
+      ],
+      [
+        "Empty pallet pickup",
+        "2",
+        "75.00",
+        "150.00"
+      ],
+      [
+        "Flatbed delivery - Long Beach",
+        "3",
+        "180.00",
+        "540.00"
+      ],
+      [
+        "Liftgate service",
+        "3",
+        "45.00",
+        "135.00"
+      ],
+      [
+        "Pallet inspection and sorting (hours)",
+        "8",
+        "42.00",
+        "336.00"
+      ],
+      [
+        "Disposal of damaged pallets",
+        "1",
+        "120.00",
+        "120.00"
+      ],
+      [
+        "Fuel surcharge",
+        "1",
+        "64.80",
+        "64.80"
+      ]
+    ],
+    "expected_issue_codes": [],
+    "expected_status": "ready"
+  },
+  "adversarial/not_really_a.pdf": {
+    "expected_preflight": "rejected",
+    "reason": "Extension says PDF but the bytes are a Windows PE executable (MZ header)."
+  },
+  "adversarial/huge_dimensions.png": {
+    "expected_preflight": "rejected",
+    "reason": "Declared image size of 3.6 billion pixels exceeds the decode limit."
+  },
+  "adversarial/active_content.pdf": {
+    "expected_preflight": "rejected",
+    "reason": "PDF catalog carries an /OpenAction JavaScript action."
+  },
+  "adversarial/notes.docx": {
+    "expected_preflight": "rejected",
+    "reason": "Word documents are not a supported input type."
+  },
+  "adversarial/invoice_acme_copy.pdf": {
+    "expected_preflight": "duplicate",
+    "reason": "Same sha256 as demo/invoice_acme_INV-2026-0142.pdf."
+  }
+}

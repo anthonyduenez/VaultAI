@@ -1,0 +1,15 @@
+# Local data never leaves the machine and never enters git.
+/data/
+.env
+.audit/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/.venv/
+*.egg-info/
+
+node_modules/
+frontend/dist/
+frontend/coverage/
+.DS_Store
