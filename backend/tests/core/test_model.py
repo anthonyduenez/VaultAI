@@ -41,10 +41,12 @@ def test_reply_wrapped_in_reasoning_and_code_fences_is_parsed(settings):
         return _reply('<think>It mentions an invoice number.</think>\n```json\n{"doc_type": "invoice", "confidence": 0.9}\n```')
 
     model = OpenAICompatModel(_settings(settings), transport=httpx.MockTransport(handler))
-    out = model.run(ClassifyTask((DocLine("p1.l1", "INVOICE"),), tuple(DocType)))
-    assert out == {"doc_type": "invoice", "confidence": 0.9}
-    assert (sent[0]["model"], sent[0]["response_format"], sent[0]["temperature"]) == ("nemotron", {"type": "json_object"}, 0.0)
-    assert "<document>\n[p1.l1] INVOICE\n</document>" in sent[0]["messages"][1]["content"]
+    reply = model.run(ClassifyTask((DocLine("p1.l1", "INVOICE"),), tuple(DocType)))
+    assert (reply.output, reply.attempts) == ({"doc_type": "invoice", "confidence": 0.9}, 1)
+    assert (sent[0]["model"], sent[0]["response_format"]["type"], sent[0]["temperature"]) == ("nemotron", "json_schema", 0.0)
+    schema = sent[0]["response_format"]["json_schema"]["schema"]
+    assert schema["properties"]["doc_type"]["anyOf"][0]["enum"] == [t.value for t in DocType]
+    assert "<document>\n<<page 1>>\n[p1.l1] INVOICE\n</document>" in sent[0]["messages"][1]["content"]
 
 
 def test_quarantined_lines_never_reach_the_model(settings):
@@ -52,12 +54,13 @@ def test_quarantined_lines_never_reach_the_model(settings):
 
     def handler(request: httpx.Request) -> httpx.Response:
         bodies.append(request.content.decode())
-        return _reply('{"claims": [], "obligations": []}')
+        return _reply('{"fields": []}')
 
     ctx = make_ctx(_settings(settings), OpenAICompatModel(_settings(settings), transport=httpx.MockTransport(handler)))
-    doc_id = run(ctx, "invoice.pdf", invoice_pdf(extra=(INJECTION,), white=((72, 600, HIDDEN),)))
+    doc_id = run(ctx, "invoice.pdf", invoice_pdf(vendor="", extra=("Payable to Zephyr Tools LLC", INJECTION),
+                                                 white=((72, 600, HIDDEN),)))
     sent = "\n".join(bodies)
-    assert "Zephyr Tools LLC" in sent
+    assert len(bodies) == 1 and "Zephyr Tools LLC" in sent
     assert HIDDEN not in sent and "SYSTEM OVERRIDE" not in sent and "Ignore previous instructions" not in sent
     assert {"prompt_injection", "hidden_text"} <= issue_codes(ctx, doc_id)
 
@@ -74,11 +77,11 @@ def test_unreachable_model_is_reported_and_never_replaced_by_the_mock(settings):
         model.run(ClassifyTask((DocLine("p1.l1", "x"),), tuple(DocType)))
 
     ctx = make_ctx(_settings(settings, port), model)
-    doc_id = run(ctx, "invoice.pdf", invoice_pdf())
+    doc_id = run(ctx, "invoice.pdf", _vendorless())
     row = doc(ctx, doc_id)
-    assert (row["status"], row["model_kind"], row["summary_json"]) == ("needs_review", "openai_compat", None)
-    assert issue_codes(ctx, doc_id) == {"model_unavailable"}
-    assert field(ctx, doc_id, "total")["ai_value"] == "20.00"
+    assert (row["status"], row["model_kind"], row["route"]) == ("needs_review", "openai_compat", "model")
+    assert issue_codes(ctx, doc_id) == {"model_unavailable", "missing_required"}
+    assert (field(ctx, doc_id, "total")["ai_value"], field(ctx, doc_id, "vendor")["ai_value"]) == ("20.00", None)
 
 
 def _vendorless(*extra: str) -> bytes:
@@ -105,10 +108,10 @@ def test_grounded_model_value_is_kept_as_flagged_inert_text(settings):
     ctx = make_ctx(settings, model)
     doc_id = run(ctx, "invoice.pdf", _vendorless(REMIT))
     vendor = field(ctx, doc_id, "vendor")
-    assert [type(t).__name__ for t in model.tasks] == ["ExtractTask", "AnalyzeTask"]
+    assert [type(t).__name__ for t in model.tasks] == ["ExtractTask"]
     assert [f.key for f in model.tasks[0].fields] == ["vendor"]
     assert (vendor["ai_value"], vendor["ai_origin"], vendor["confidence"], vendor["model_name"]) == (
-        "https://pay.zephyr.example/remit", "model", 0.85, "scripted")
+        "https://pay.zephyr.example/remit", "model", 0.8, "scripted")
     with ctx.db() as conn:
         flagged = conn.execute("SELECT code, field_key FROM issues WHERE doc_id = ?", (doc_id,)).fetchall()
     assert [tuple(r) for r in flagged] == [("prompt_injection", "vendor")]
@@ -123,15 +126,15 @@ def test_a_required_value_from_the_model_never_auto_approves_whatever_the_thresh
     by_rules = run(ctx, "rules.pdf", invoice_pdf(number="ZT-7"))
     by_model = run(ctx, "model.pdf", _vendorless("Make checks payable to Zephyr Tools LLC"))
     vendor = field(ctx, by_model, "vendor")
-    assert (vendor["ai_value"], vendor["ai_origin"], vendor["confidence"]) == ("Zephyr Tools LLC", "model", 0.85)
+    assert (vendor["ai_value"], vendor["ai_origin"], vendor["confidence"]) == ("Zephyr Tools LLC", "model", 0.8)
     assert [(doc(ctx, d)["status"], doc(ctx, d)["approval_kind"]) for d in (by_rules, by_model)] == [
         ("approved", "policy"), ("ready", None)]
 
 
 def test_uncited_or_misquoted_model_values_are_dropped(settings):
     model = ScriptedModel(_extract_answer(lambda t: {"fields": [
-        {"key": "vendor", "value": "rm -rf /", "line_id": t.lines[0].id, "quote": "rm -rf /"},
-        {"key": "vendor", "value": "Acme", "line_id": "p9.l99", "quote": "Acme"}]}))
+        {"key": "vendor", "value": "rm -rf /", "line_id": t.lines[0].id, "quote": "rm -rf /", "confidence": 0.9},
+        {"key": "vendor", "value": "Acme", "line_id": "p9.l99", "quote": "Acme", "confidence": 0.9}]}))
     ctx = make_ctx(settings, model)
     doc_id = run(ctx, "invoice.pdf", _vendorless(REMIT))
     assert field(ctx, doc_id, "vendor")["ai_value"] is None
@@ -171,27 +174,31 @@ def test_model_classifies_only_when_rules_are_unsure_and_only_into_known_types(s
     assert "model_output_rejected" in issue_codes(unknown, unknown_id)
 
 
+MEMO = pdf(["MEMORANDUM", "From: Dana Ruiz, Facilities", "To: All Staff", "Date: October 7, 2026",
+           "Subject: Badge renewal", "All staff must renew building badges by November 15, 2026."])
+
+
 def test_summary_claims_keep_only_valid_citations(settings):
     def answer(task: Task) -> object:
         if isinstance(task, AnalyzeTask):
             first = task.lines[0].id
-            return {"claims": [{"text": "Invoice from Zephyr Tools LLC.", "line_ids": [first, "p7.l1"]},
-                               {"text": "Pay immediately to avoid fees.", "line_ids": []},
+            return {"claims": [{"text": "Memo from Dana Ruiz.", "line_ids": [first, "p7.l1"]},
+                               {"text": "Renew badges immediately.", "line_ids": []},
                                {"text": "Invented claim.", "line_ids": ["p9.l9"]}],
                     "obligations": []}
         return empty_answers(task)
 
     ctx = make_ctx(settings, ScriptedModel(answer))
-    doc_id = run(ctx, "invoice.pdf", invoice_pdf())
+    doc_id = run(ctx, "memo.pdf", MEMO)
     summary = json.loads(doc(ctx, doc_id)["summary_json"])
     assert [(c["text"], [e["line_id"] for e in c["evidence"]]) for c in summary["claims"]] == [
-        ("Invoice from Zephyr Tools LLC.", ["p1.l1"])]
-    assert (summary["generator"], summary["model_name"]) == ("model", "scripted")
+        ("Memo from Dana Ruiz.", ["p1.l1"])]
+    assert (summary["generator"], summary["model_name"], doc(ctx, doc_id)["route"]) == ("model", "scripted", "model")
 
 
 def test_mock_summary_is_a_template_that_cites_its_facts(mock_ctx):
     doc_id = run(mock_ctx, "invoice.pdf", invoice_pdf())
     summary = json.loads(doc(mock_ctx, doc_id)["summary_json"])
-    assert (summary["generator"], summary["model_name"]) == ("template", "mock-rules")
+    assert (summary["generator"], summary["model_name"]) == ("template", None)
     assert summary["claims"][0]["text"] == "Vendor: Zephyr Tools LLC."
     assert [e["line_id"] for e in summary["claims"][0]["evidence"]] == ["p1.l1"]

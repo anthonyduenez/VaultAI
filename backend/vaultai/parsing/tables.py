@@ -60,24 +60,42 @@ def _column_for(span: Span, cols: list[Column]) -> Column:
     return min(cols, key=lambda c: abs((c.x0 + c.x1) / 2 - centre))
 
 
-def read_rows(doc: Doc, roles: Mapping[str, re.Pattern[str]], required: frozenset[str], stop: re.Pattern[str]) -> list[Row]:
-    """Rows of every table whose header matches `roles`; a table may continue on the next page under a repeated header."""
-    rows: list[Row] = []
+@dataclass(frozen=True)
+class Table:
+    header: Line
+    columns: tuple[Column, ...]
+    rows: tuple[Row, ...]
+
+
+def find_tables(doc: Doc, roles: Mapping[str, re.Pattern[str]], required: frozenset[str], stop: re.Pattern[str]) -> list[Table]:
+    """Every table whose header matches `roles`, page by page; a table repeated under a new header on the next page is a new Table."""
+    tables: list[Table] = []
     for page in doc.pages:
+        header: Line | None = None
         cols: list[Column] | None = None
+        rows: list[Row] = []
         for line in (ln for ln in page.lines if ln.flag is None):
             if cols is None:
                 cols = _header(line, roles, required)
+                header = line if cols else None
                 continue
             if stop.match(line.text.lower()) or len(line.spans) < 2:
-                cols = None
+                tables.append(Table(header, tuple(cols), tuple(rows)))
+                header, cols, rows = None, None, []
                 continue
             cells: dict[str, str] = {}
             for span in line.spans:
                 role = _column_for(span, cols).role
                 cells[role] = f"{cells[role]} {span.text}" if role in cells else span.text
             rows.append(Row(line, cells))
-    return rows
+        if cols is not None and header is not None:
+            tables.append(Table(header, tuple(cols), tuple(rows)))
+    return tables
+
+
+def read_rows(doc: Doc, roles: Mapping[str, re.Pattern[str]], required: frozenset[str], stop: re.Pattern[str]) -> list[Row]:
+    """Rows of every table whose header matches `roles`; a table may continue on the next page under a repeated header."""
+    return [row for table in find_tables(doc, roles, required, stop) for row in table.rows]
 
 
 def _decimal(text: str | None) -> Decimal | None:

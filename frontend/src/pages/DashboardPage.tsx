@@ -225,6 +225,18 @@ function MetricsPanel({ metrics: m }: { metrics: Metrics }) {
     { label: "Auto-approval rate", value: formatPercent(m.auto_approval_rate) },
     { label: "Field correction rate", value: formatPercent(m.field_correction_rate) },
     { label: "Cache hits", value: cacheTotal === 0 ? "—" : `${formatCount(m.cache_hits)} / ${formatCount(cacheTotal)}` },
+    { label: "Model calls", value: m.model_calls === 0 ? "—" : `${formatCount(m.model_calls)} · ${formatMs(m.avg_model_call_ms)} avg` },
+    {
+      label: "Model retries / rejected",
+      value: m.model_calls === 0 ? "—" : `${formatCount(m.model_retries)} / ${formatCount(m.model_outputs_rejected)}`,
+    },
+    {
+      label: "Model tokens (in / out)",
+      value:
+        m.model_prompt_tokens + m.model_completion_tokens === 0
+          ? "—"
+          : `${formatCount(m.model_prompt_tokens)} / ${formatCount(m.model_completion_tokens)}`,
+    },
     { label: "CPU load (1/5/15 min)", value: m.load_avg ? m.load_avg.map((v) => v.toFixed(2)).join(" · ") : "—" },
     { label: "Process memory", value: m.rss_mb === null ? "—" : `${Math.round(m.rss_mb)} MB` },
   ];

@@ -99,7 +99,10 @@ def rasterize_pdf(pdf: bytes, dpi: int = 200) -> bytes:
     import pypdfium2 as pdfium
 
     doc = pdfium.PdfDocument(pdf)
-    images = [doc[i].render(scale=dpi / 72).to_pil().convert("L") for i in range(len(doc))]
+    try:
+        images = [doc[i].render(scale=dpi / 72).to_pil().convert("L") for i in range(len(doc))]
+    finally:
+        doc.close()
     buf = io.BytesIO()
     images[0].save(buf, format="TIFF", compression="tiff_lzw", save_all=len(images) > 1, append_images=images[1:],
                    dpi=(dpi, dpi))

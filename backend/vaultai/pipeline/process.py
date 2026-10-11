@@ -13,9 +13,12 @@ import os
 import secrets
 import shutil
 import sqlite3
+import threading
 import time
-from collections.abc import Iterable, Mapping
+from collections import Counter
+from collections.abc import Iterable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
@@ -24,7 +27,7 @@ from pathlib import Path
 from vaultai import db, repo
 from vaultai.analysis import ClauseRec, ObligationRec
 from vaultai.analysis.contracts import analyze
-from vaultai.classify import MODEL_LINES, Classification, classify_rules, from_hint
+from vaultai.classify import Classification, classify_rules, from_hint, scores, span_text
 from vaultai.context import AppContext
 from vaultai.domain import (
     LEGAL_DOC_TYPES,
@@ -48,11 +51,12 @@ from vaultai.domain import (
     TextMethod,
     ValueType,
 )
-from vaultai.extraction import Found, Item
-from vaultai.extraction.rules import extract_fields, kv_label
+from vaultai.extraction import Found, Item, evidence
+from vaultai.extraction.rules import currency_field, extract_fields, kv_label
 from vaultai.logging_utils import get_logger
-from vaultai.model import grounding, prompts
-from vaultai.model.base import AnalyzeTask, ClassifyTask, DocLine, ExtractTask, ModelUnavailable, Task, TranscribeTask
+from vaultai.model import confidence, context, grounding, output, prompts
+from vaultai.model.base import AnalyzeTask, ClassifyTask, DocLine, ExtractTask, ModelUnavailable, Reply, Task, TranscribeTask
+from vaultai.model.templates import ANALYZED_TYPES
 from vaultai.parsing import isolate, ocr
 from vaultai.parsing.layout import Doc, Line, Page, Word, merge_words, text_spans
 from vaultai.parsing.tables import line_items
@@ -67,7 +71,12 @@ log = get_logger("vaultai.pipeline")
 ACTOR = "pipeline"
 AUTO_APPROVER = "policy:auto-approve"
 MAX_FACTS = 8
+MAX_CLAIMS = 6
 OCR_WORKERS = 4
+CLASSIFY_CONTEXT_CHARS = 2500
+CLASSIFY_CANDIDATES = 3
+# Text-only models cannot see a drawn signature, so these stay with the rules (or "unknown") and are never asked of a model.
+NOT_FOR_MODEL = frozenset({"signature_status", "signature_present"})
 MODEL_UNAVAILABLE = "The local model could not be reached; rules-only results were kept for review."
 
 
@@ -105,38 +114,91 @@ class Run:
     route: Route = Route.FAST
     ocr_engine: str | None = None
     model_unavailable: bool = False
+    stages_ms: dict[str, int] = field(default_factory=dict)
+    model_stats: Counter = field(default_factory=Counter)
+    prompt_versions: set[str] = field(default_factory=set)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def metrics(self, ctx: AppContext) -> dict:
+        """What the document cost, without any of its content."""
+        stats = self.model_stats
+        return {
+            "stages_ms": self.stages_ms,
+            "model": {
+                "name": ctx.model.name,
+                "kind": ctx.model.kind.value,
+                "calls": {k.removeprefix("calls:"): v for k, v in sorted(stats.items()) if k.startswith("calls:")},
+                **{k: stats[k] for k in ("attempts", "retries", "rejected", "cache_hits", "prompt_chars",
+                                         "prompt_tokens", "completion_tokens", "ms", "unavailable")},
+                "prompt_versions": sorted(self.prompt_versions),
+                "config": cache.model_config(ctx.settings),
+            },
+            "route": self.route.value,
+            "ocr_engine": self.ocr_engine,
+        }
+
+
+@contextmanager
+def _timed(run: Run, stage: str) -> Iterator[None]:
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        run.stages_ms[stage] = run.stages_ms.get(stage, 0) + int((time.monotonic() - started) * 1000)
 
 
 class _Model:
-    def __init__(self, ctx: AppContext, run: Run, use_cache: bool) -> None:
+    """Every model call for one document goes through ask(): cache, metrics, and the unavailable switch."""
+
+    def __init__(self, ctx: AppContext, run: Run, use_cache: bool, doc_sha256: str) -> None:
         self.ctx = ctx
         self.run = run
         self.llm = ctx.model.kind is not ModelKind.MOCK
         self.use_cache = use_cache
+        self.doc_sha256 = doc_sha256
+
+    def _note(self, **counts: int) -> None:
+        with self.run.lock:
+            self.run.model_stats.update(counts)
 
     def ask(self, task: Task) -> object | None:
         if self.run.model_unavailable:
             return None
+        kind = type(task).__name__
         key = None
         if self.llm:
             body = prompts.messages(task) if not isinstance(task, TranscribeTask) else task.image_png.hex()
-            key = cache.key(type(task).__name__, cache.content_hash(body), self.ctx.model.name)
+            version = prompts.prompt_version(task)
+            with self.run.lock:
+                self.run.prompt_versions.add(version)
+            key = cache.model_key(kind, self.doc_sha256, body, version, self.ctx.model.name, self.ctx.settings)
             if self.use_cache:
                 with self.ctx.db() as conn:
                     hit = cache.get(conn, key)
                 if hit is not None:
+                    self._note(cache_hits=1)
                     return hit
+        started = time.monotonic()
         try:
             out = self.ctx.model.run(task)
         except ModelUnavailable:
-            self.run.model_unavailable = True
-            self.run.issues.append(Issue(IssueCode.MODEL_UNAVAILABLE, MODEL_UNAVAILABLE))
-            log.warning("model unavailable model=%s", self.ctx.model.name)
+            with self.run.lock:
+                if not self.run.model_unavailable:
+                    self.run.model_unavailable = True
+                    self.run.issues.append(Issue(IssueCode.MODEL_UNAVAILABLE, MODEL_UNAVAILABLE))
+            self._note(unavailable=1, ms=int((time.monotonic() - started) * 1000))
+            log.warning("model unavailable model=%s task=%s", self.ctx.model.name, kind)
             return None
-        if key is not None:
+        reply = out if isinstance(out, Reply) else Reply(out)
+        valid = output.parse(task, reply.output) is not None
+        self._note(**{f"calls:{kind}": 1}, attempts=reply.attempts, retries=reply.attempts - 1, rejected=int(not valid),
+                   prompt_chars=reply.prompt_chars, ms=int((time.monotonic() - started) * 1000),
+                   prompt_tokens=reply.usage.get("prompt_tokens", 0),
+                   completion_tokens=reply.usage.get("completion_tokens", 0))
+        if key is not None and valid:
             with self.ctx.db() as conn:
-                cache.put(conn, key, out)
-        return out
+                cache.put(conn, key, reply.output)
+        return reply.output
 
 
 def _stage(ctx: AppContext, doc_id: str, stage: str) -> None:
@@ -219,10 +281,6 @@ def _ocr_words(ctx: AppContext, engine: ocr.OcrEngine, page: Page, png: Path) ->
     return words
 
 
-def _model_lines(doc: Doc) -> tuple[DocLine, ...]:
-    return tuple(DocLine(ln.id, ln.text) for ln in doc.visible)
-
-
 def _classify(doc: Doc, hint: str | None, model: _Model, run: Run) -> Classification:
     if hint:
         return from_hint(DocType(hint))
@@ -230,35 +288,42 @@ def _classify(doc: Doc, hint: str | None, model: _Model, run: Run) -> Classifica
     if not (rules.uncertain and model.llm):
         return rules
     run.route = Route.MODEL if run.route is Route.FAST else run.route
-    task = ClassifyTask(_model_lines(doc)[:MODEL_LINES], tuple(DocType))
+    ranked = sorted(((t, v) for t, v in scores(span_text(doc)).items() if v > 0), key=lambda tv: -tv[1])
+    candidates = tuple(t for t, _ in ranked[:CLASSIFY_CANDIDATES])
+    lines = context.for_classification(context.view(doc, rules.doc_type), CLASSIFY_CONTEXT_CHARS)
+    task = ClassifyTask(lines, tuple(DocType), candidates)
     raw = model.ask(task)
     if raw is None:
         return rules
-    doc_type, confidence, issues = grounding.ground_classify(raw, task)
+    doc_type, confidence_, issues = grounding.ground_classify(raw, task)
     run.issues.extend(issues)
     if doc_type is None:
         return rules
-    return Classification(doc_type, confidence, ClassificationMethod.MODEL)
+    return Classification(doc_type, confidence_, ClassificationMethod.MODEL)
 
 
-def _extract(ctx: AppContext, doc: Doc, doc_type: DocType, model: _Model, run: Run) -> dict[str, Found]:
+def _extract(ctx: AppContext, doc: Doc, view: tuple[DocLine, ...], doc_type: DocType, model: _Model,
+             run: Run) -> dict[str, Found]:
+    """Rules first; the model is asked only for required fields the rules missed or read with low confidence."""
     settings = ctx.settings
     found = extract_fields(doc, doc_type, settings.date_order)
     schema = SCHEMAS[doc_type]
-    wanted = tuple(f for f in schema.fields if f.required and (
+    wanted = tuple(f for f in schema.fields if f.required and f.key not in NOT_FOR_MODEL and (
         f.key not in found or found[f.key].value is None or found[f.key].confidence < settings.review_confidence_threshold))
     if not wanted or not model.llm:
         return found
     run.route = Route.MODEL if run.route is Route.FAST else run.route
-    aliases = [a for f in wanted for a in (*f.aliases, f.label)]
-    lines = prompts.lines_for_fields(_model_lines(doc), aliases, prompts.budget_chars(settings))
+    lines = context.for_fields(view, wanted, settings.model_extract_context_chars, settings.date_order)
     task = ExtractTask(doc_type, wanted, lines)
     raw = model.ask(task)
     if raw is None:
         return found
     kept, issues = grounding.ground_extract(raw, task, doc, found, settings.date_order, ctx.model.name)
     run.issues.extend(issues)
-    return {**found, **{f.key: f for f in kept}}
+    merged = confidence.cross_check(doc_type, {**found, **{f.key: f for f in kept}})
+    if kept and "currency" not in merged and (currency := currency_field(doc, doc_type, merged, settings.date_order)):
+        merged["currency"] = currency
+    return merged
 
 
 def _display(f: Found, value_type: ValueType) -> str:
@@ -267,57 +332,92 @@ def _display(f: Found, value_type: ValueType) -> str:
     return f.value or ""
 
 
-def _summarize(ctx: AppContext, doc: Doc, doc_type: DocType, fields: Mapping[str, Found], model: _Model, run: Run) -> None:
-    schema = SCHEMAS[doc_type]
+def _facts(doc_type: DocType, fields: Mapping[str, Found]) -> dict[str, str]:
     facts: dict[str, str] = {}
-    for spec in schema.fields:
+    for spec in SCHEMAS[doc_type].fields:
         f = fields.get(spec.key)
         if f and f.value and f.evidence and f.evidence.line_id and spec.value_type is not ValueType.LONG_TEXT and spec.key != "currency":
             facts[f"{spec.label} [{f.evidence.line_id}]"] = _display(f, spec.value_type)
         if len(facts) >= MAX_FACTS:
             break
+    return facts
+
+
+def _template_claims(doc: Doc, facts: Mapping[str, str]) -> list[SummaryClaim]:
+    """A summary that only restates verified fields, each citing its line. No model involved."""
+    claims = []
+    for key, value in list(facts.items())[:MAX_CLAIMS]:
+        ids = [i for i in grounding.CITATION.findall(key) if i in doc.by_id]
+        if ids:
+            label = grounding.CITATION.sub("", key).strip()
+            claims.append(SummaryClaim(text=f"{label}: {value}.", evidence=[evidence(doc.by_id[i]) for i in ids]))
+    return claims
+
+
+def _analysis_budget(ctx: AppContext) -> int:
+    s = ctx.settings
+    room = (s.model_context_tokens - s.model_max_tokens - 1024) * 4
+    return max(1000, min(s.model_analysis_context_chars, room))
+
+
+def _summarize(ctx: AppContext, doc: Doc, view: tuple[DocLine, ...], doc_type: DocType, fields: Mapping[str, Found],
+               model: _Model, run: Run) -> None:
+    facts = _facts(doc_type, fields)
     claims: dict[str, SummaryClaim] = {}
     obligations: list[ObligationRec] = []
-    budget = prompts.budget_chars(ctx.settings)
-    for chunk in prompts.chunks(_model_lines(doc), budget) or [()]:
-        task = AnalyzeTask(doc_type, chunk, facts)
-        raw = model.ask(task)
-        if raw is None:
-            break
-        got, obs, issues = grounding.ground_analyze(raw, task, doc, ctx.settings.date_order)
-        run.issues.extend(issues)
-        for c in got:
-            claims.setdefault(c.text, SummaryClaim(text=c.text, evidence=list(c.evidence)))
-        obligations.extend(obs)
+    if doc_type in ANALYZED_TYPES and model.llm:
+        flags = {f"Rules flagged {c.heading} [{c.evidence.line_id}]": c.risk_reason or c.risk.value
+                 for c in run.clauses if c.risk is not ClauseRisk.NONE and c.evidence and c.evidence.line_id}
+        tasks = [AnalyzeTask(doc_type, chunk, {**facts, **flags})
+                 for chunk in context.chunks(context.for_analysis(view, doc, ctx.settings.date_order), _analysis_budget(ctx))]
+        with ThreadPoolExecutor(max_workers=max(1, min(len(tasks), ctx.settings.model_concurrency))) as pool:
+            answers = list(pool.map(model.ask, tasks))
+        for task, raw in zip(tasks, answers):
+            if raw is None:
+                continue
+            got, obs, issues = grounding.ground_analyze(raw, task, doc, ctx.settings.date_order)
+            run.issues.extend(issues)
+            for c in got:
+                claims.setdefault(c.text, SummaryClaim(text=c.text, evidence=list(c.evidence)))
+            obligations.extend(obs)
     known = {(o.kind, o.evidence.line_id if o.evidence else None) for o in run.obligations}
-    run.obligations.extend(o for o in obligations if (o.kind, o.evidence.line_id if o.evidence else None) not in known)
+    added = [o for o in obligations if (o.kind, o.evidence.line_id if o.evidence else None) not in known]
+    run.obligations.extend(added)
+    if claims or added:
+        run.route = Route.MODEL if run.route is Route.FAST else run.route
     if claims:
-        mock = ctx.model.kind is ModelKind.MOCK
-        run.summary = Summary(claims=list(claims.values()), generator="template" if mock else "model",
-                              model_name=ctx.model.name, generated_at=db.now())
+        run.summary = Summary(claims=list(claims.values()), generator="model", model_name=ctx.model.name,
+                              generated_at=db.now())
+    elif template := _template_claims(doc, facts):
+        run.summary = Summary(claims=template, generator="template", model_name=None, generated_at=db.now())
 
 
 def _work(ctx: AppContext, doc_id: str, row: sqlite3.Row, run: Run) -> None:
-    model = _Model(ctx, run, use_cache=row["processed_at"] is None)
+    model = _Model(ctx, run, use_cache=row["processed_at"] is None, doc_sha256=row["sha256"])
     _stage(ctx, doc_id, "Reading pages")
-    _read_pages(ctx, doc_id, row, run, model)
-    doc = flag_lines(Doc(tuple(run.pages)))
-    run.pages = list(doc.pages)
+    with _timed(run, "read"):
+        _read_pages(ctx, doc_id, row, run, model)
+        doc = flag_lines(Doc(tuple(run.pages)))
+        run.pages = list(doc.pages)
 
     _stage(ctx, doc_id, "Classifying")
-    run.classification = _classify(doc, row["doc_type_hint"], model, run)
+    with _timed(run, "classify"):
+        run.classification = _classify(doc, row["doc_type_hint"], model, run)
     doc_type = run.classification.doc_type
+    view = context.view(doc, doc_type) if model.llm else ()
 
     _stage(ctx, doc_id, "Extracting fields")
-    run.fields = _extract(ctx, doc, doc_type, model, run)
-    if SCHEMAS[doc_type].has_line_items:
-        run.items = line_items(doc)
+    with _timed(run, "extract"):
+        run.fields = _extract(ctx, doc, view, doc_type, model, run)
+        if SCHEMAS[doc_type].has_line_items:
+            run.items = line_items(doc)
 
     if doc_type in LEGAL_DOC_TYPES or doc_type is DocType.CORRESPONDENCE:
         _stage(ctx, doc_id, "Analyzing clauses")
-    analysis = analyze(doc, doc_type, run.fields, ctx.settings.date_order)
-    run.clauses, run.obligations = list(analysis.clauses), list(analysis.obligations)
-    _summarize(ctx, doc, doc_type, run.fields, model, run)
+    with _timed(run, "analyze"):
+        analysis = analyze(doc, doc_type, run.fields, ctx.settings.date_order)
+        run.clauses, run.obligations = list(analysis.clauses), list(analysis.obligations)
+        _summarize(ctx, doc, view, doc_type, run.fields, model, run)
     _stage(ctx, doc_id, "Validating")
 
 
@@ -338,7 +438,7 @@ _FIELD_INSERT = (
 )
 
 
-def _write_records(conn: sqlite3.Connection, doc_id: str, run: Run) -> None:
+def _write_records(ctx: AppContext, conn: sqlite3.Connection, doc_id: str, run: Run) -> None:
     edits = {r["key"]: r for r in conn.execute("SELECT * FROM fields WHERE doc_id = ? AND edited_at IS NOT NULL", (doc_id,))}
     decided = {(r["kind"], r["description"]): r["status"] for r in conn.execute(
         "SELECT kind, description, status FROM obligations WHERE doc_id = ? AND status != ?",
@@ -390,6 +490,19 @@ def _write_records(conn: sqlite3.Connection, doc_id: str, run: Run) -> None:
              o.origin.value, *db.evidence_columns(o.evidence), now, now),
         )
     _insert_issues(conn, doc_id, run.issues)
+    conn.execute(
+        "INSERT INTO doc_metrics (doc_id, metrics_json, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(doc_id) DO UPDATE SET metrics_json = excluded.metrics_json, updated_at = excluded.updated_at",
+        (doc_id, json.dumps(run.metrics(ctx)), now),
+    )
+    stats = run.model_stats
+    for name in ("attempts", "retries", "rejected", "prompt_tokens", "completion_tokens", "unavailable"):
+        if stats[name]:
+            db.bump(conn, f"model_{name}", stats[name])
+    calls = sum(v for k, v in stats.items() if k.startswith("calls:"))
+    if calls:
+        db.bump(conn, "model_calls", calls)
+        db.bump(conn, "model_ms", stats["ms"])
 
 
 def _insert_issues(conn: sqlite3.Connection, doc_id: str, issues: Iterable[Issue]) -> None:
@@ -569,9 +682,12 @@ def process_document(ctx: AppContext, doc_id: str) -> None:
             if current is None or current["status"] != DocStatus.PROCESSING.value:
                 return
             _move_images(ctx, doc_id, run)
-            _write_records(conn, doc_id, run)
+            _write_records(ctx, conn, doc_id, run)
             final = _finish(ctx, conn, doc_id, run, ms)
-        log.info("processed doc=%s pages=%d ms=%d status=%s route=%s", doc_id, run.page_count, ms, final.value, run.route.value)
+        calls = sum(v for k, v in run.model_stats.items() if k.startswith("calls:"))
+        log.info("processed doc=%s pages=%d ms=%d status=%s route=%s model_calls=%d model_ms=%d retries=%d stages=%s",
+                 doc_id, run.page_count, ms, final.value, run.route.value, calls, run.model_stats["ms"],
+                 run.model_stats["retries"], ",".join(f"{k}:{v}" for k, v in run.stages_ms.items()))
     except Exception as exc:
         log.warning("processing failed doc=%s error=%s", doc_id, type(exc).__name__)
         _fail(ctx, doc_id, exc)

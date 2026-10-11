@@ -51,7 +51,11 @@ class Settings:
     model_temperature: float = 0.0
     model_vision: bool = False
     model_json_mode: bool = True
+    model_response_format: str = "json_schema"
     model_system_prefix: str = ""
+    model_concurrency: int = 2
+    model_extract_context_chars: int = 2400
+    model_analysis_context_chars: int = 12000
 
     ocr_engine: str = "auto"
     tesseract_cmd: str = "tesseract"
@@ -198,10 +202,14 @@ def _check(s: Settings) -> None:
         )
     if not is_local_host(s.host):
         raise ConfigError("VAULTAI_HOST must be a loopback or private address; the desktop API is never public")
+    if s.model_concurrency < 1 or s.model_extract_context_chars < 500 or s.model_analysis_context_chars < 1000:
+        raise ConfigError("VAULTAI_MODEL_CONCURRENCY must be at least 1 and the model context budgets at least 500 "
+                          "(extract) and 1000 (analysis) characters")
 
 
 _CHOICES = {
     "date_order": ("MDY", "DMY"),
+    "model_response_format": ("json_schema", "json_object", "none"),
     "ocr_engine": ("auto", "tesseract", "none"),
     "scanner_backend": ("auto", "sane", "mock", "none"),
 }

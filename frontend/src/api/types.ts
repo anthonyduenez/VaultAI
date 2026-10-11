@@ -466,6 +466,13 @@ export interface Metrics {
   avg_export_ms: number | null;
   cache_hits: number;
   cache_misses: number;
+  model_calls: number;
+  model_retries: number;
+  model_outputs_rejected: number;
+  model_unavailable: number;
+  model_prompt_tokens: number;
+  model_completion_tokens: number;
+  avg_model_call_ms: number | null;
   load_avg: number[] | null;
   rss_mb: number | null;
   gpu: GpuStatus | null;

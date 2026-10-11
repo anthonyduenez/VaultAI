@@ -245,6 +245,13 @@ CREATE TABLE IF NOT EXISTS cache (
   created_at TEXT NOT NULL
 );
 
+-- Per-document processing metrics: stage timings, model calls, tokens, prompt and model versions. No document text.
+CREATE TABLE IF NOT EXISTS doc_metrics (
+  doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+  metrics_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS counters (
   name TEXT PRIMARY KEY,
   value INTEGER NOT NULL
