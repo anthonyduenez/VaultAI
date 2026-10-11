@@ -449,6 +449,11 @@ def _currency(ctx: Ctx, fields: dict[str, Found]) -> Found | None:
     return None
 
 
+def currency_field(doc: Doc, doc_type: DocType, fields: dict[str, Found], date_order: str) -> Found | None:
+    """The currency read from the printed marker of the document's money values, when the field is still empty."""
+    return _currency(Ctx(doc, SCHEMAS[doc_type], date_order), fields)
+
+
 def extract_fields(doc: Doc, doc_type: DocType, date_order: str) -> dict[str, Found]:
     ctx = Ctx(doc, SCHEMAS[doc_type], date_order)
     fields: dict[str, Found] = {}

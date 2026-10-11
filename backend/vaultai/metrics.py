@@ -12,6 +12,7 @@ import time
 
 from vaultai.context import AppContext
 from vaultai.domain import AuditAction, DocStatus, DocTiming, GpuStatus, Metrics, Route, Severity
+from vaultai.model import diagnostics
 from vaultai.pipeline.cache import HITS, MISSES
 
 GPU_TTL_S = 5.0
@@ -82,7 +83,7 @@ def compute_metrics(ctx: AppContext) -> Metrics:
             "SELECT COUNT(*) AS fields, COALESCE(SUM(edited_at IS NOT NULL), 0) AS edited FROM fields WHERE doc_id IN "
             f"(SELECT DISTINCT doc_id FROM audit_log WHERE {_REVIEWED})", REVIEW_ACTIONS).fetchone()
         export_ms = conn.execute("SELECT AVG(duration_ms) FROM exports").fetchone()[0]
-        counters = dict(conn.execute("SELECT name, value FROM counters WHERE name IN (?, ?)", (HITS, MISSES)).fetchall())
+        counters = dict(conn.execute("SELECT name, value FROM counters").fetchall())
         recent = [
             DocTiming(doc_id=r["id"], filename=r["filename"], pages=r["page_count"] or 0, ms=r["processing_ms"] or 0,
                       route=Route(r["route"]) if r["route"] else None)
@@ -103,6 +104,16 @@ def compute_metrics(ctx: AppContext) -> Metrics:
         avg_export_ms=round(export_ms, 1) if export_ms is not None else None,
         cache_hits=counters.get(HITS, 0),
         cache_misses=counters.get(MISSES, 0),
+        model_calls=counters.get("model_calls", 0),
+        model_retries=counters.get("model_retries", 0),
+        model_outputs_rejected=counters.get("model_rejected", 0),
+        model_unavailable=counters.get("model_unavailable", 0),
+        model_prompt_tokens=counters.get("model_prompt_tokens", 0),
+        model_completion_tokens=counters.get("model_completion_tokens", 0),
+        avg_model_call_ms=round(counters["model_ms"] / counters["model_calls"], 1) if counters.get("model_calls") else None,
+        model_failure_reasons=diagnostics.from_counters(counters, "failure_reasons"),
+        model_rejections_by_reason=diagnostics.from_counters(counters, "rejections_by_reason"),
+        grounding_rejections_by_reason=diagnostics.from_counters(counters, "grounding_rejections_by_reason"),
         load_avg=[round(v, 2) for v in os.getloadavg()] if hasattr(os, "getloadavg") else None,
         rss_mb=_rss_mb(),
         gpu=gpu_status(),

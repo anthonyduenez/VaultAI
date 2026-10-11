@@ -35,8 +35,8 @@ flowchart LR
     H --> I[Track<br/>Action Center]
     H --> J[Export<br/>XLSX or CSV]
     E -. only when rules are unsure .-> M[(Local model<br/>OpenAI-compatible)]
-    F -. only for missing fields .-> M
-    F --> S[Summarize and<br/>find obligations] -.-> M
+    F -. only for missing required fields .-> M
+    F --> S[Summarize and<br/>find obligations] -. legal docs and<br/>correspondence only .-> M
 ```
 
 Processes on the machine:
@@ -63,6 +63,8 @@ backend/
 docs/
   API.md                HTTP contract, generated TypeScript types mirror it
   DEMO.md               click-by-click demo script
+  AI_TUNING_BASELINE.md model-path metrics before the tuning work
+  AI_TUNING.md          what changed, final metrics, fine-tuning decision, how to reproduce
 frontend/
   src/                  React 19 + TypeScript app (Vite)
   dist/                 production build, served by the backend when present
@@ -72,7 +74,7 @@ samples/
   adversarial/          5 files that preflight must reject or deduplicate
   expected.json         ground truth for every sample
 scripts/
-  eval_samples.py       scores the pipeline against expected.json
+  eval_samples.py       scores the pipeline against expected.json (mock, oracle, or local model; text, OCR, or stress)
   gen_types.py          regenerates frontend/src/api/types.ts from domain.py
   start_gx10_demo.sh     verifies Nemotron, builds the UI, starts VaultAI, and loads samples
 SECURITY.md             security model, threat model, retention, known gaps
@@ -186,18 +188,39 @@ VAULTAI_MODEL_CONTEXT_TOKENS=8192
 VAULTAI_MODEL_MAX_TOKENS=1024
 VAULTAI_MODEL_TIMEOUT_S=180
 VAULTAI_MODEL_TEMPERATURE=0
-VAULTAI_MODEL_JSON_MODE=true      # sends response_format=json_object
+VAULTAI_MODEL_JSON_MODE=true      # false sends no response_format at all
+VAULTAI_MODEL_RESPONSE_FORMAT=json_schema   # json_schema | json_object | none
 VAULTAI_MODEL_VISION=false        # Nemotron 3.5 Lightning is text-only; local OCR handles page images
+VAULTAI_MODEL_ENABLE_THINKING=false  # sent as chat_template_kwargs.enable_thinking on every request
 VAULTAI_MODEL_SYSTEM_PREFIX=      # see below
+VAULTAI_MODEL_CONCURRENCY=2       # model requests in flight at once, across all documents
+VAULTAI_MODEL_EXTRACT_CONTEXT_CHARS=2400    # document text per field-extraction request
+VAULTAI_MODEL_ANALYSIS_CONTEXT_CHARS=12000  # document text per obligation/summary request
 ```
 
 What the model is asked to do, and what it is not allowed to do:
 
-- The rules classify every document first. The model is asked to classify only when the rules are unsure (confidence below 0.6 or a small margin between the top two types), and only from the first 60 visible lines.
-- The model is asked to extract only the required fields the rules missed or read with confidence below `VAULTAI_REVIEW_CONFIDENCE_THRESHOLD` (0.75). It sees the lines nearest to those fields' labels, within the context budget.
-- For every document the model is asked to summarize and list obligations, one chunk at a time. Chunks run one after another.
-- Every value the model returns must name a line id it was shown and quote text that is on that line. Values that fail this check are discarded and logged as `ungrounded_value`. Output that does not match the closed JSON schema is discarded whole and logged as `model_output_rejected`.
-- Model output never auto-approves, whatever the thresholds. Auto-approval requires the rules-only route (no model read a page, chose the type, or was asked for a field) and every required field to come from the rules or a human edit. Model confidence is also capped at 0.85, and a model value never replaces a rules value that is more confident.
+- The rules classify every document first. The model is asked to classify only when the rules are unsure (confidence below 0.6 or a small margin between the top two types). It sees the opening of page 1, the top of later pages, and the rules' closest candidates.
+- The model is asked to extract only the required fields the rules missed or read with confidence below `VAULTAI_REVIEW_CONFIDENCE_THRESHOLD` (0.75). It is never asked for signature status, because a text-only model cannot see a signature. It sees the lines most likely to hold those fields, up to `VAULTAI_MODEL_EXTRACT_CONTEXT_CHARS`, so a short document goes whole and a long one does not.
+- Only contracts, agreement letters, statements of work, policies, correspondence, and "other" documents get a model summary and obligation pass. Checks, receipts, invoices, purchase orders, quotes, and forms get a template summary of their verified fields and no model call. Analysis chunks run concurrently, up to `VAULTAI_MODEL_CONCURRENCY` requests at once.
+- Each document type has its own prompt template (`backend/vaultai/model/templates.py`). Each template names the type, the allowed keys, required and optional fields, value types, what each field is and is easily confused with, and the null rule. Legal templates allow facts and issue spotting only, keep the document's wording, and leave risk flags to the rules.
+- The model sees each line's id and exact text, with layout notes on separate lines: pages, tables and their columns, clauses, signature blocks, two-column blocks read one column at a time, and low OCR confidence. Page numbers and repeated headers and footers are left out.
+- Output is constrained with a per-task JSON Schema (`response_format: json_schema`). If the server refuses schemas, VaultAI uses `json_object` instead. A reply that is not JSON or not the schema gets one repair turn, two attempts in all. A reply is read up to 1 MB.
+- Obligation analysis is its own task. The prompt defines binding language (shall, must, agrees to, is responsible for, deadlines such as "no later than" or "within") and says what to leave out (permissions such as "may", descriptions, background). It lists the document's parties and defined terms, and asks for one entry per duty. Each obligation cites the line where its quote starts, and `end_line_id` lets a wrapped sentence continue onto one or two following lines. A relative deadline such as "within 30 days" goes in `deadline_text`; `due_date` is set only when a calendar date is printed there. VaultAI refuses an obligation when:
+  - its citation or quote is not exact;
+  - its sentence has no binding language;
+  - the sentence names a different party;
+  - its deadline is not printed.
+
+  Every refusal is recorded with a stable code.
+- Every value must name a line id the model was shown and quote that line exactly (spacing aside). Text values are stored as printed. Amounts, dates, and currencies are re-parsed from the quote. Values that fail are discarded and logged as `ungrounded_value`, and are never retried. Output that still does not match the schema is discarded whole as `model_output_rejected`.
+- Confidence comes from the evidence, not from the model:
+  - label proximity, OCR quality, and agreement with the rules;
+  - cross-field arithmetic, date order, and identifier checks;
+  - a ceiling of 0.85, and anything below 0.40 is discarded.
+
+  `docs/AI_TUNING.md` has the full policy. A model value never replaces a more confident rules value.
+- Model output never auto-approves, whatever the thresholds. Auto-approval requires the rules-only route and every required field to come from the rules or a human edit. A document whose fields, summary, or obligations came from the model is model-assisted.
 - Lines flagged as hidden or as prompt injection are never sent to the model.
 - There is no code path from model output to a status change, an approval, a deletion, or a file. The model adapter only returns JSON.
 
@@ -205,10 +228,14 @@ Endpoint and failure rules:
 
 - The endpoint host must be `localhost` or a loopback, RFC 1918, link-local, or IPv6 ULA address. Anything else fails at startup with `ConfigError`. The check runs again before every request.
 - Proxy environment variables are ignored (`trust_env=False`), redirects are not followed, and the in-process egress guard blocks any socket connect to a non-local address.
-- If the model is unreachable or answers with an error, the document keeps its rules-only results, gets a `model_unavailable` warning, and goes to `needs_review`. There is no fallback to a cloud API and no silent fallback to the mock backend.
+- If the model is unreachable, times out (`VAULTAI_MODEL_TIMEOUT_S`), or answers with an error, the document keeps its rules-only results, gets a `model_unavailable` warning, and goes to `needs_review`. There is no fallback to a cloud API and no silent fallback to the mock backend.
+- Validated model answers are cached in the database. The key covers the document hash, the exact prompt, the prompt version, the model, and the model settings, so changing any of them asks again.
+- Per-document stage timings, model calls, retries, rejections, token counts, and rejection reasons are stored in `doc_metrics` without any document text. Reasons are stable codes with counts; the rejected reply, the prompt, and quoted lines are never stored or logged. Totals appear on the dashboard and at `GET /api/system/metrics`.
 - **Settings & Privacy** shows whether the endpoint is reachable and which model it serves.
 
-`VAULTAI_MODEL_SYSTEM_PREFIX` is prepended as the first line of the system prompt on every request. Nemotron reasoning models accept `/no_think` there to skip the reasoning block, which saves tokens and time on short JSON tasks. If a model emits `<think>` blocks anyway, the reply parser strips them before it looks for the JSON object.
+Every request carries a top-level `"chat_template_kwargs": {"enable_thinking": false}` (from `VAULTAI_MODEL_ENABLE_THINKING`, false by default). With vLLM's reasoning parser on, Nemotron 3.5 Lightning otherwise spends its tokens on a `reasoning` field and returns `content: null`. VaultAI reads only `message.content`. Reasoning text is never taken as an answer, and an empty reply counts as unusable: it gets the one repair attempt, then the document goes to review with `model_output_rejected`. If a model writes `<think>` blocks inside `content`, the reply parser strips them before it looks for the JSON object.
+
+`VAULTAI_MODEL_SYSTEM_PREFIX` is prepended as the first line of the system prompt on every request. Some reasoning models accept `/no_think` there. Nemotron does not need it once thinking is off in the chat template.
 
 `VAULTAI_MODEL_VISION=true` enables one more use. When a page has no text layer and no OCR engine is available, the page image is sent to the model for transcription. A document read this way takes the vision route, so it can never auto-approve. When tesseract is installed, OCR is used and the vision path is not.
 
@@ -310,10 +337,10 @@ Everything VaultAI stores is under `VAULTAI_DATA_DIR` (default `data/`). Nothing
 | --- | --- | --- |
 | Original file | `data/raw/<random>.<ext>` | document delete, delete all |
 | Rendered page PNGs | `data/derived/<doc_id>/` | document delete, delete all |
-| Fields, line items, issues, clauses, obligations, summary, search index | `data/vaultai.db` | document delete, delete all |
+| Fields, line items, issues, clauses, obligations, summary, search index, processing metrics | `data/vaultai.db` | document delete, delete all |
 | OCR and model response cache | `data/vaultai.db` | delete all |
 | Scanner and phone session pages | `data/captures/<session>/` | assemble, cancel, delete all |
-| Exports | `data/exports/<random>.xlsx` or `.csv` | delete all |
+| Exports, feedback exports | `data/exports/<random>.xlsx`, `.csv`, or `.jsonl` | delete all |
 | Audit log | `data/vaultai.db` | delete all |
 
 Delete one document from its page with **Delete**, then **Delete permanently**. This removes the file, the page images, every derived row, the search entry, and the intake rows that named the file (including duplicate rows that pointed at it). The document's audit rows stay as the record of what happened, but their `before`, `after`, and `note` columns are set to NULL, so edited values and reviewer notes do not outlive the document. Each row keeps its action, actor, time, document id, and field key. The `delete` row's note is only `sha256 <first 12 hex characters>`, with no filename. One exception: `preflight_reject` rows for files that were never stored keep "filename: reason", because there is no document to delete.
@@ -352,7 +379,7 @@ VaultAI is a document assistant. It is not legal, tax, accounting, or financial 
 ## Tests
 
 ```sh
-cd backend && .venv/bin/python -m pytest          # 199 passed
+cd backend && .venv/bin/python -m pytest          # 311 passed
 cd frontend && npm test                            # 46 passed in 12 files
 cd frontend && npm run build                       # type check and bundle
 backend/.venv/bin/python scripts/eval_samples.py   # scores every sample against expected.json
@@ -363,13 +390,64 @@ backend/.venv/bin/python scripts/gen_types.py --check   # exit 1 if types.ts is 
 
 Other timings on the development Mac: OCR of a 6-page scan went from 3.05 s to 1.31 s for `process_document` when OCR started running four pages at once. Reviewers measured on synthetic data that the export preview went from 76 ms to 16 ms at 1,000 approved records, and the dashboard from 1,064 ms to 32 ms at 2,000 documents after `doc_id` indexes were added.
 
+## Evaluating the model path
+
+The bundled samples are read completely by the rules, so they cannot show what the model adds. `eval_samples.py` has two harder variants and three backends:
+
+| Option | Meaning |
+| --- | --- |
+| `--variant text` | the committed PDFs (default) |
+| `--variant ocr` | every page rasterized, so tesseract reads it |
+| `--variant stress` | printed labels renamed to synonyms the rules do not know, so required fields fall to the model. Keep these synonyms out of the rules. |
+| `--backend mock` | rules only (default; the only run with pass/fail gates) |
+| `--backend oracle` | a perfect reader limited to the lines VaultAI sends. Measures context recall, call counts, and prompt size, not a language model. |
+| `--backend openai_compat` | the local model in `.env`, for example Nemotron on the GX10. Refuses a non-local endpoint and installs the egress guard first. |
+
+```sh
+backend/.venv/bin/python scripts/eval_samples.py --backend oracle --variant stress --json oracle-stress.json
+backend/.venv/bin/python scripts/eval_samples.py --backend openai_compat --variant stress --json nemotron-stress.json   # on the GX10
+```
+
+Each run prints, and with `--json` saves:
+
+- required-field and all-field accuracy, missing and incorrect fields;
+- model values kept and how many were right, grounded-value rate, rejected outputs;
+- model calls by task, prompt size, token counts;
+- processing time, OCR failures, and the review-status distribution;
+- diagnostics as counts by stable code, never text:
+  - `model_failure_reasons` counts every refused attempt by code (`empty_content`, `invalid_json`, `schema_invalid`, `response_too_large`);
+  - `model_output_rejections_by_reason` counts the same codes for replies still unusable after the repair attempt;
+  - `grounding_rejections_by_reason` counts well-formed answers that the evidence check discarded, by code (`citation_missing`, `citation_line_not_shown`, `citation_non_adjacent`, `quote_includes_markup`, `quote_elided`, `quote_needs_end_line`, `quote_wrong_line`, `quote_mismatch`, `unsupported_by_document`, `conflicting_evidence`, `weak_evidence`, `deadline_not_grounded`, `party_not_grounded`, `not_an_obligation`, `unknown_field`, `other`);
+  - the model's obligations, proposed, grounded, rejected by code, and repeating a rules obligation; `model_obligations_correct` counts grounded ones that match an expected obligation's kind, due date, and party (a defined term such as "Client" matches the full name it stands for);
+  - a `documents` list with the same counts per sample, each rejected obligation's cited line id and code, and whether the status and issue set match.
+
+  The same counts are stored per document in `doc_metrics`, summed in `GET /api/system/metrics`, and shown on the dashboard.
+
+[docs/AI_TUNING_BASELINE.md](docs/AI_TUNING_BASELINE.md) has the numbers before the tuning work. [docs/AI_TUNING.md](docs/AI_TUNING.md) has the numbers after, the confidence policy, the remaining failure modes, and why the model weights were not fine-tuned.
+
+Reviewer corrections can become evaluation data:
+
+```sh
+cd backend && .venv/bin/python -m vaultai export-feedback            # corrected fields from human-approved documents
+cd backend && .venv/bin/python -m vaultai export-feedback --include-confirmed --include-document-text
+```
+
+The export writes JSONL to `data/exports/`, owner-only.
+
+- **Included:** the document hash, type, field, original and corrected values, evidence line, review decision, prompt and model versions, and OCR metadata.
+- **Excluded:** rejected, unreviewed, policy-approved, and injection-flagged documents, reviewer names, and raw documents unless asked.
+- **Splits:** each record's train, validation, or test split follows its document type and counterparty, so one vendor's layouts never appear in both training and evaluation.
+
+Nothing trains automatically.
+
 ## Known limitations
 
 - The GX10/Nemotron path is exercised by the demo workflow, but a complete performance benchmark has not been recorded. A real SANE scanner was not tested.
 - The two-page scanned invoice can land in review with an amount mismatch because OCR misses table rows.
 - Signature status is `unknown` on scans and photos.
 - Sideways text on rotated pages can merge into one line.
-- Analysis chunks are sent to the model one at a time, so a long contract takes several model calls in sequence. OCR pages run four at a time, but model calls do not.
+- Model accuracy and latency on the GX10 have not been measured. The evaluation in `docs/AI_TUNING.md` uses the rules and an oracle; run `eval_samples.py --backend openai_compat` on the GX10 for real numbers.
+- A model value must be quoted from one line, so values split across lines (some party lists and addresses) stay missing for review.
 - The phone listener is plain HTTP on the LAN.
 - The parser memory cap (`VAULTAI_PARSE_MEMORY_MB`) uses `RLIMIT_AS`, which macOS does not enforce. On macOS only the CPU limit and the timeout bound the parser. The cap works on Linux, including the GX10.
 - The egress guard is an in-process socket patch, not a firewall.
@@ -378,7 +456,6 @@ Other timings on the development Mac: OCR of a 6-page scan went from 3.05 s to 1
 ## Future improvements
 
 - TLS for the phone listener with a self-signed certificate pinned in the QR code.
-- Run analysis chunks in parallel against a batching model server.
 - Signature detection on scans and photos with a small local vision model.
 - Rotation detection before OCR for sideways pages.
 - Row recovery for dense OCR'd tables using column alignment.

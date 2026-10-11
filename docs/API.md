@@ -162,7 +162,12 @@ def build_model(settings: Settings) -> ModelAdapter: ...
 def ocr_status(settings: Settings) -> tuple[bool, str | None]: ...   # (available, "tesseract 5.x")
 
 # vaultai/metrics.py
-def compute_metrics(ctx: AppContext) -> Metrics: ...
+def compute_metrics(ctx: AppContext) -> Metrics: ...   # includes model calls, retries, rejections, tokens
+
+# vaultai/feedback.py
+def export_feedback(ctx: AppContext, *, actor: str, now: datetime, include_confirmed: bool = False,
+                    include_evidence_text: bool = True, include_document_text: bool = False) -> FeedbackExport: ...
+    # reviewed corrections from human-approved documents as owner-only JSONL in data/exports; audited
 
 # vaultai/security/egress.py
 def install_egress_guard() -> None: ...   # blocks outbound connections to non-local addresses process-wide

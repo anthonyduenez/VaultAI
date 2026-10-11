@@ -697,6 +697,16 @@ class Metrics(ApiModel):
     avg_export_ms: float | None = None
     cache_hits: int
     cache_misses: int
+    model_calls: int = 0
+    model_retries: int = 0
+    model_outputs_rejected: int = 0
+    model_unavailable: int = 0
+    model_prompt_tokens: int = 0
+    model_completion_tokens: int = 0
+    avg_model_call_ms: float | None = None
+    model_failure_reasons: dict[str, int] = Field(default_factory=dict)
+    model_rejections_by_reason: dict[str, int] = Field(default_factory=dict)
+    grounding_rejections_by_reason: dict[str, int] = Field(default_factory=dict)
     load_avg: list[float] | None = None
     rss_mb: float | None = None
     gpu: GpuStatus | None = None

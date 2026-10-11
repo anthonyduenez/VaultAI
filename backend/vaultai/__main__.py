@@ -4,6 +4,7 @@
     python -m vaultai init-db         create the data directories and database
     python -m vaultai load-samples    import and process samples/demo without the UI
     python -m vaultai delete-data     delete every document, derived file, export, and record
+    python -m vaultai export-feedback write reviewer corrections as JSONL for local evaluation or tuning
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import sys
 
 import uvicorn
 
-from vaultai import deletion
+from vaultai import db, deletion, feedback
 from vaultai.app import build_context, create_app
 from vaultai.config import load_settings
 from vaultai.domain import PreflightStatus
@@ -59,6 +60,18 @@ def delete_data(confirmed: bool) -> None:
     print(f"Deleted all VaultAI data under {settings.data_dir}.")
 
 
+def export_feedback(include_confirmed: bool, evidence_text: bool, document_text: bool) -> None:
+    settings = load_settings()
+    result = feedback.export_feedback(build_context(settings), actor=settings.reviewer_name, now=db.now(),
+                                      include_confirmed=include_confirmed, include_evidence_text=evidence_text,
+                                      include_document_text=document_text)
+    print(f"Wrote {result.records} reviewed field records from {result.documents} documents to {result.path}")
+    if result.document_text_path:
+        print(f"Document text for those documents: {result.document_text_path}")
+    if result.skipped_documents:
+        print(f"Skipped {result.skipped_documents} approved documents with injection or hidden-text findings.")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m vaultai", description="VaultAI: local document AI for business.")
     sub = parser.add_subparsers(dest="command")
@@ -67,6 +80,12 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("load-samples", help="import and process samples/demo without the UI")
     delete = sub.add_parser("delete-data", help="delete every document, derived file, export, and record")
     delete.add_argument("--yes", action="store_true", help="confirm deletion")
+    fb = sub.add_parser("export-feedback", help="write reviewer corrections as JSONL for local evaluation or tuning")
+    fb.add_argument("--include-confirmed", action="store_true",
+                    help="also write model values a reviewer approved without editing")
+    fb.add_argument("--no-evidence-text", action="store_true", help="omit the quoted evidence line from each record")
+    fb.add_argument("--include-document-text", action="store_true",
+                    help="also write each exported document's visible lines to a second file")
     args = parser.parse_args(argv)
     configure_logging()
     match args.command:
@@ -78,6 +97,8 @@ def main(argv: list[str] | None = None) -> None:
             load_samples()
         case "delete-data":
             delete_data(args.yes)
+        case "export-feedback":
+            export_feedback(args.include_confirmed, not args.no_evidence_text, args.include_document_text)
 
 
 if __name__ == "__main__":
