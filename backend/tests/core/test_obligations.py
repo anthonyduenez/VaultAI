@@ -116,33 +116,50 @@ def test_an_obligation_split_across_adjacent_lines_needs_its_end_line():
     kept, reasons = _accepted(_ob("p1.l5", quote, kind="payment", party="Supplier", end_line_id="p1.l6"))
     assert reasons == [] and kept[0].evidence.text == f"{TEXT[4]} {TEXT[5]}"
     assert kept[0].evidence.bbox == (0.1, 0.2, 0.9, 0.252)
-    assert _accepted(_ob("p1.l5", quote, kind="payment", party="Supplier"))[1] == ["obligation_not_grounded"]
+    assert _accepted(_ob("p1.l5", quote, kind="payment", party="Supplier"))[1] == ["quote_needs_end_line"]
 
 
-@pytest.mark.parametrize("line_id, end_line_id", [
-    ("", None),
-    ("p9.l99", None),
-    ("page 1", None),
-    ("p1.l5", "p1.l9"),
-    ("p1.l6", "p1.l5"),
-    ("p1.l12", None),
+@pytest.mark.parametrize("line_id, end_line_id, reason", [
+    ("", None, "citation_missing"),
+    ("page 1", None, "citation_missing"),
+    ("p9.l99", None, "citation_line_not_shown"),
+    ("p1.l12", None, "citation_line_not_shown"),
+    ("p1.l5", "p1.l12", "citation_line_not_shown"),
+    ("p1.l5", "p1.l9", "citation_non_adjacent"),
+    ("p1.l6", "p1.l5", "citation_non_adjacent"),
+    ("p1.l5", "the next line", "quote_needs_end_line"),
 ])
-def test_missing_invented_distant_or_quarantined_citations_are_invalid(line_id, end_line_id):
+def test_missing_invented_distant_or_quarantined_citations_are_rejected(line_id, end_line_id, reason):
     kept, reasons = _accepted(_ob(line_id, "Supplier will invoice monthly in advance.", kind="payment",
                                   end_line_id=end_line_id))
-    assert (kept, reasons) == ([], ["invalid_citation"])
+    assert (kept, reasons) == ([], [reason])
 
 
 def test_a_span_across_a_hidden_line_is_invalid():
     doc = _doc({6: "hidden", 12: "injection"})
     kept, reasons = _accepted(_ob("p1.l5", "Supplier will invoice monthly in advance.", kind="payment",
                                   end_line_id="p1.l7"), doc=doc)
-    assert (kept, reasons) == ([], ["invalid_citation"])
+    assert (kept, reasons) == ([], ["citation_non_adjacent"])
 
 
 def test_a_quote_that_is_not_on_the_cited_line_is_rejected():
     kept, reasons = _accepted(_ob("p1.l5", "Buyer shall pay every invoice within 30 days.", kind="payment"))
-    assert (kept, reasons) == ([], ["obligation_not_grounded"])
+    assert (kept, reasons) == ([], ["quote_mismatch"])
+
+
+@pytest.mark.parametrize("line_id, quote, reason", [
+    ("p1.l5", "[p1.l5] Buyer shall pay each invoice within thirty (30) days of receipt.", "quote_includes_markup"),
+    ("p1.l5", "<<clause: payment>> Buyer shall pay each invoice", "quote_includes_markup"),
+    ("p1.l5", "Buyer shall pay each invoice ... of receipt.", "quote_elided"),
+    ("p1.l5", "Buyer shall pay each invoice \u2026 of receipt.", "quote_elided"),
+    ("p1.l5", "Supplier will invoice monthly in advance.", "quote_needs_end_line"),
+    ("p1.l6", "Buyer shall pay each invoice within thirty (30) days of receipt.", "quote_wrong_line"),
+    ("p1.l6", "Supplier will invoice monthly in advance.", "quote_wrong_line"),
+    ("p1.l5", "Buyer must pay all invoices promptly.", "quote_mismatch"),
+])
+def test_each_quote_failure_has_one_code(line_id, quote, reason):
+    kept, reasons = _accepted(_ob(line_id, quote, kind="payment"))
+    assert (kept, reasons) == ([], [reason])
 
 
 def test_curly_and_straight_apostrophes_match():
@@ -278,7 +295,7 @@ def test_obligation_diagnostics_are_codes_and_counts_only(settings, caplog):
         text = conn.execute("SELECT metrics_json FROM doc_metrics WHERE doc_id = ?", (doc_id,)).fetchone()[0]
         kept = conn.execute("SELECT description FROM obligations WHERE doc_id = ? AND origin = 'model'", (doc_id,)).fetchall()
     counts = json.loads(text)["model"]["grounding_rejections_by_reason"]
-    assert {k: v for k, v in counts.items() if v} == {"not_an_obligation": 1, "invalid_citation": 1,
+    assert {k: v for k, v in counts.items() if v} == {"not_an_obligation": 1, "citation_line_not_shown": 1,
                                                       "deadline_not_grounded": 1}
     assert all(SECRET not in r[0] for r in kept)
     for leaked in (SECRET, "Quokka", "Zephyr", "Harborview", "Delaware", "December 31"):

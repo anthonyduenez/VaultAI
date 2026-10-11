@@ -27,9 +27,10 @@ TASK = ExtractTask(DocType.INVOICE, (VENDOR,), (DocLine("p1.l1", "Zephyr Tools L
 GOOD = json.dumps({"fields": [{"key": "vendor", "value": "Zephyr Tools LLC", "line_id": "p1.l1",
                                "quote": "Zephyr Tools LLC", "confidence": 0.9}]})
 FAILURE_CODES = {"empty_content", "invalid_json", "schema_invalid", "response_too_large"}
-GROUNDING_CODES = {"invalid_citation", "unsupported_by_document", "conflicting_evidence", "weak_evidence",
-                   "obligation_not_grounded", "deadline_not_grounded", "party_not_grounded", "not_an_obligation",
-                   "unknown_field", "other"}
+GROUNDING_CODES = {"citation_missing", "citation_line_not_shown", "citation_non_adjacent", "quote_includes_markup",
+                   "quote_elided", "quote_needs_end_line", "quote_wrong_line", "quote_mismatch",
+                   "unsupported_by_document", "conflicting_evidence", "weak_evidence", "deadline_not_grounded",
+                   "party_not_grounded", "not_an_obligation", "unknown_field", "other"}
 
 
 def _local(settings, **changes):
@@ -153,11 +154,11 @@ def test_an_empty_reply_is_counted_as_empty_content_in_document_metrics(settings
 @pytest.mark.parametrize("answer, reason, message", [
     (_answer("status", "approved", "p1.l1", "Invoice Number"), "unknown_field",
      "The model proposed a value that is not supported by the document text; it was discarded."),
-    (_answer("total", "5328.00", "p9.l99", "$5,328.00"), "invalid_citation",
+    (_answer("total", "5328.00", "p9.l99", "$5,328.00"), "citation_line_not_shown",
      "The model proposed a value that is not supported by the document text; it was discarded."),
-    (_answer("total", "5328.00", "not-a-line", "$5,328.00"), "invalid_citation",
+    (_answer("total", "5328.00", "not-a-line", "$5,328.00"), "citation_missing",
      "The model proposed a value that is not supported by the document text; it was discarded."),
-    (_answer("total", "5328.00", "p1.l3", "Total payable $5,328.00"), "unsupported_by_document",
+    (_answer("total", "5328.00", "p1.l3", "Total payable $5,328.00"), "quote_mismatch",
      "The model proposed a value that is not supported by the document text; it was discarded."),
     (_answer("total", "9999.00", "p1.l3", "Total Due: $5,328.00"), "unsupported_by_document",
      "The model proposed a total that is not supported by the document text; it was discarded."),
@@ -186,7 +187,7 @@ def test_obligation_codes_separate_bad_citations_bad_quotes_and_bad_deadlines():
          "quote": "deliver the report by November 20, 2026"}]}
     _, obligations, issues = _analyze(raw)
     assert obligations == []
-    assert [i.reason for i in issues] == ["invalid_citation", "obligation_not_grounded", "deadline_not_grounded"]
+    assert [i.reason for i in issues] == ["citation_line_not_shown", "quote_mismatch", "deadline_not_grounded"]
 
 
 def test_grounding_diagnostics_never_carry_values_or_quotes(settings):
@@ -203,11 +204,11 @@ def test_grounding_diagnostics_never_carry_values_or_quotes(settings):
     doc_id = run(ctx, "invoice.pdf", _vendorless())
     text, stored = _stored(ctx, doc_id)
     counts = stored["model"]["grounding_rejections_by_reason"]
-    assert (counts["unsupported_by_document"], counts["invalid_citation"], sum(counts.values())) == (1, 1, 2)
+    assert (counts["quote_mismatch"], counts["citation_line_not_shown"], sum(counts.values())) == (1, 1, 2)
     for leaked in (SECRET, "Zephyr", "Payable", "p9.l9"):
         assert leaked not in text
     m = compute_metrics(ctx)
-    assert m.grounding_rejections_by_reason["invalid_citation"] == 1
+    assert m.grounding_rejections_by_reason["citation_line_not_shown"] == 1
 
 
 def test_a_classification_outside_the_allowed_types_is_a_schema_rejection():

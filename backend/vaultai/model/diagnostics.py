@@ -23,13 +23,23 @@ class FailureReason(StrEnum):
 
 
 class GroundingReason(StrEnum):
-    """Why a well-formed model answer was discarded by the evidence check. Never retried."""
+    """Why a well-formed model answer was discarded by the evidence check. Never retried.
 
-    INVALID_CITATION = "invalid_citation"
+    Citation codes say what was wrong with the cited line ids; quote codes say how a quote failed to match its cited
+    lines, checked in the order listed. They diagnose only: none of them makes a value acceptable.
+    """
+
+    CITATION_MISSING = "citation_missing"
+    CITATION_LINE_NOT_SHOWN = "citation_line_not_shown"
+    CITATION_NON_ADJACENT = "citation_non_adjacent"
+    QUOTE_INCLUDES_MARKUP = "quote_includes_markup"
+    QUOTE_ELIDED = "quote_elided"
+    QUOTE_NEEDS_END_LINE = "quote_needs_end_line"
+    QUOTE_WRONG_LINE = "quote_wrong_line"
+    QUOTE_MISMATCH = "quote_mismatch"
     UNSUPPORTED_BY_DOCUMENT = "unsupported_by_document"
     CONFLICTING_EVIDENCE = "conflicting_evidence"
     WEAK_EVIDENCE = "weak_evidence"
-    OBLIGATION_NOT_GROUNDED = "obligation_not_grounded"
     DEADLINE_NOT_GROUNDED = "deadline_not_grounded"
     PARTY_NOT_GROUNDED = "party_not_grounded"
     NOT_AN_OBLIGATION = "not_an_obligation"

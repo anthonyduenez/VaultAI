@@ -123,16 +123,24 @@ Every rejection is recorded as a stable code with a count, per document in `doc_
 | `invalid_json` | same | The content was not a JSON object | Structured output support on the server |
 | `schema_invalid` | same | A JSON object that is not the requested structure, or a type outside the allowed list | Prompt or schema |
 | `response_too_large` | same | The reply exceeded 1 MB and was cut off. It is not retried. | Server limits |
-| `invalid_citation` | `grounding_rejections_by_reason` | Line id missing, malformed, not shown to the model, or not in the document; for an obligation, also an `end_line_id` that is not one or two lines after `line_id` on the same page, or a span that crosses a quarantined line | Prompt: cite shown ids only |
-| `unsupported_by_document` | same | The quote is not on the cited line, or the value does not read as its type inside the quote | Prompt: copy exactly; possibly tuning |
+| `citation_missing` | `grounding_rejections_by_reason` | No usable line id: empty, a page number, or not of the form `p1.l4` | Prompt: cite the line id |
+| `citation_line_not_shown` | same | A line id the model was not shown: invented, outside the context, or quarantined | Prompt: cite shown ids only |
+| `citation_non_adjacent` | same | An `end_line_id` that is not one or two lines after `line_id` on the same page, comes before it, or spans a quarantined line | Prompt: spans of adjacent lines only |
+| `quote_includes_markup` | same | The quote contains a line tag such as `[p1.l4]` or a `<<` layout note | Prompt: quote document text only |
+| `quote_elided` | same | The quote shortens the text with "..." | Prompt: no ellipses |
+| `quote_needs_end_line` | same | The quote starts on the cited line and continues exactly onto the next one or two shown lines, but `end_line_id` does not cover them | Set `end_line_id`, or infer it safely (see below) |
+| `quote_wrong_line` | same | The exact quote is on other shown lines, not starting on the cited line | Prompt: cite the line where the quote starts |
+| `quote_mismatch` | same | The quote is not copied exactly from any shown line or span: paraphrased or altered | Prompt: copy exactly |
+| `unsupported_by_document` | same | The quote is on the cited line, but the value does not read as its type inside it | Prompt; possibly tuning |
 | `conflicting_evidence` | same | Two different answers for one field | Prompt or context |
 | `weak_evidence` | same | Calibrated confidence below 0.40, usually poor OCR | OCR |
-| `obligation_not_grounded` | same | An obligation's quote is not copied exactly from its cited line or lines | Prompt: copy exactly, use `end_line_id` for a wrapped sentence |
 | `deadline_not_grounded` | same | An obligation's `deadline_text` is not in its sentence, or its `due_date` is not printed in the deadline text (or the quote), often a date computed from "within N days" | Prompt: relative deadlines go in `deadline_text` only |
 | `party_not_grounded` | same | The sentence names a different party before its binding verb than the one the model gave | Prompt: party as printed |
 | `not_an_obligation` | same | The quoted sentence has no binding language for its kind: a permission ("may"), a description, or background | Prompt: duties only |
 | `unknown_field` | same | A key that was not requested | Schema enforcement on the server |
 | `other` | same | A discarded value without a recognized code | Investigate |
+
+Quote codes are checked in the order listed, so each failed quote gets exactly one. The codes replaced `invalid_citation` and `obligation_not_grounded` (in use from `e564e2b` to `68ea35e`). `obligation_not_grounded` is now one of the `quote_*` codes, and `invalid_citation` is one of the `citation_*` codes. Records written with the old codes read as zero under the new ones.
 
 `model_failure_reasons` counts every refused attempt, including ones the repair turn recovered. `model_output_rejections_by_reason` counts only replies that stayed unusable. Its total equals `model_outputs_rejected`.
 
@@ -197,14 +205,76 @@ The oracle proposes every expected obligation whose date is printed, quoting the
 
 ### What to look for on the GX10
 
-Rerun `./scripts/run_nemotron_evals.sh`, then compare `grounding_rejections_by_reason`, `model_obligations_accepted`, `model_obligations_correct`, and the grounded-value rate with the baseline above.
+Rerun `./scripts/run_nemotron_evals.sh`, then compare `grounding_rejections_by_reason`, `model_obligations_accepted`, `model_obligations_correct`, and the grounded-value rate with the baseline above. Since the investigation below, read the corrected metrics and the `quote_*` codes.
 
-- `obligation_not_grounded` and `deadline_not_grounded` should fall if the causes above were the main ones.
+- Quote failures (then `obligation_not_grounded`) and `deadline_not_grounded` should fall if the causes above were the main ones.
 - `not_an_obligation` and `party_not_grounded` are new. A count there is an unsupported obligation refused, not a regression.
 
 Because those new refusals also count against the grounded-value rate, the rate alone is not the measure. The aim is more correct obligations accepted and none unsupported.
 
 Until those numbers exist, this change is not an improvement in Nemotron's scores.
+
+## Investigating the GX10 results after `68ea35e`
+
+The operator reported these GX10 numbers after `68ea35e`, with Nemotron 3.5 Lightning:
+
+| Variant | Required fields | All fields | Grounded-value rate | Obligations accepted | Obligations correct | Main rejection |
+| --- | --- | --- | --- | --- | --- | --- |
+| text | 100% | 100% | 31.25% (was 45%) | 5 | 0 | `obligation_not_grounded` 11 |
+| stress | 96.36% (was 98.18%) | 98.69% (was 99.35%) | 82.61% | 4 | 0 | `obligation_not_grounded` 8 |
+| OCR | 94.55% | 94.77% | 23.08% | 1 | 0 | `obligation_not_grounded` 8, `unsupported_by_document` 1, `not_an_obligation` 1 |
+
+There were no empty, malformed, or oversized replies. Each possible cause was checked on the development Mac before any prompt change.
+
+| Hypothesis | Finding | Evidence |
+| --- | --- | --- |
+| 1. Evaluator or scoring problem | **Confirmed.** The zero correct obligations is partly an artifact of the evaluator. | The rules already find all 21 expected obligations. VaultAI keeps the rules' record when the model reports the same obligation (same kind and line). The old `model_obligations_correct` looked only at the model obligations that survived, so a model that agreed with the rules scored zero. It also compared parties as exact text, so "Client" never matched "Harborview Logistics LLC". On the oracle, the old metric counts 3 of the 8 correct obligations; the corrected one counts all 8. The grounded-value rate had the same flaw: a model obligation dropped as a repeat of a rules obligation counted for nothing, so agreeing with the rules lowered the rate. |
+| 2. Prompt or schema compatibility | No sign of a problem. | No empty, malformed, schema-invalid, or oversized reply in any of the three GX10 runs. |
+| 3. Nemotron not following the citation rules | Unknown, now measurable. | `obligation_not_grounded` covered every quote failure. The `quote_*` codes now say which kind. |
+| 4. Overly strict grounding | Not the main cause. | The checks added in `68ea35e` (`not_an_obligation`, `party_not_grounded`) account for none of the 11 text rejections and 1 of the OCR ones. Quote matching was loosened there (curly quotes and dashes), not tightened. |
+| 5. Multiline obligations or relative deadlines | Relative deadlines: improved. Multiline: plausible. | Stress `deadline_not_grounded` went from 4 to 0 after `deadline_text` was added. 10 of the 26 duty sentences in the five analyzed samples wrap onto a following line (none is longer than 40 words). That is close to the 11 text failures, but nothing yet shows the model omits `end_line_id`. `quote_needs_end_line` will. |
+| 6. Context selection | Ruled out. | Every expected obligation the rules find has its evidence line in the model's context: 25 of 25 on text and stress, 23 of 23 on OCR. |
+| Field accuracy changes | Not caused by `68ea35e`. | The extraction prompts at `e564e2b` and `68ea35e` are byte-identical for every stress and OCR document, and field grounding was only loosened. The one-field difference on stress is run-to-run variation in the model's output. Repeat runs would show its size. |
+
+### What changed in response
+
+- **The evaluator scores the model's own obligations.** Each analysis reply is grounded again in memory, exactly as the pipeline grounds it, before repeats of rules obligations are dropped. Scoring stays strict on kind and due date. A party matches when it is the same name apart from case and punctuation, or when the document itself defines the two names as one party. Descriptions and citations are not compared. The new metrics are:
+  - `model_obligations_proposed`;
+  - `model_obligations_grounded`;
+  - `model_obligations_duplicates_of_rules`;
+  - `model_obligations_rejected` and `obligation_rejections_by_reason`;
+  - `expected_obligations`.
+
+  `model_obligations_accepted` still counts the model obligations stored as new records.
+- **Two metrics changed meaning.** `model_obligations_correct` and `grounded_value_rate` now use the grounded obligations before repeats are dropped. The old values are kept as `model_obligations_correct_legacy` and `grounded_value_rate_legacy`, so earlier runs can be compared like for like.
+- **Per-document report.** The JSON has a `documents` list with, for each sample:
+  - status and issue-set matches;
+  - model calls by task;
+  - model-output rejection codes and grounding rejection codes;
+  - the obligation counts, and each rejected obligation's cited line id with its code.
+
+  It holds no quote, value, or reply text. `--verbose` prints the line ids and codes.
+- **Granular codes.** See [Diagnosing rejections](#diagnosing-rejections).
+- **No prompt, schema, context, or acceptance change.** The prompts are byte-identical to `68ea35e`, so the next GX10 run measures the same model behavior with better instruments.
+
+### Prompt review notes
+
+These are left as they are until the GX10 codes show which matter:
+
+- **The parties line repeats names.** It reads "Provider = Brightpath Data Services, Inc.; Brightpath Data Services, Inc." because full names are also listed on their own.
+- **A computed date appears as a verified fact.** "Non-renewal notice deadline [p1.l12]: 2026-11-01" is not printed on p1.l12. That conflicts with the rule never to compute dates.
+- **Two tasks share one call.** Claims and obligations come from the same reply, and the reply starts with claims.
+
+### Next GX10 run
+
+Run `./scripts/run_nemotron_evals.sh` twice at this commit. The second run shows how much the numbers move with no change at all. Then read `obligation_rejections_by_reason`:
+
+| If most rejections are | The next change |
+| --- | --- |
+| `quote_needs_end_line` | When the quote starts on the cited line and continues exactly onto the next one or two shown, adjacent, unquarantined lines, take those lines as the span. The text is still exact and adjacent, so no evidence check is relaxed. |
+| `quote_wrong_line` | Make the rule to cite the line where the quote starts more prominent. The citation stays checked: no automatic re-citing. |
+| `quote_includes_markup` or `quote_elided` | Strip a leading line tag that equals the cited id; forbid ellipses in the prompt. |
+| `quote_mismatch` | Ask for the shortest phrase that states the duty instead of the whole sentence. |
 
 ## Remaining failure modes
 

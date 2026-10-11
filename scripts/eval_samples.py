@@ -16,9 +16,14 @@ Usage: backend/.venv/bin/python scripts/eval_samples.py [--verbose] [--backend m
 Diagnostics in the output are counts by stable code, never text: model_failure_reasons (every refused attempt:
 empty_content, invalid_json, schema_invalid, response_too_large), model_output_rejections_by_reason (replies still
 unusable after the repair attempt), and grounding_rejections_by_reason (well-formed answers the evidence check
-discarded: invalid_citation, unsupported_by_document, conflicting_evidence, weak_evidence, obligation_not_grounded,
-deadline_not_grounded, party_not_grounded, not_an_obligation, unknown_field, other). model_obligations_correct counts
-model obligations whose kind, due date, and party match an expected obligation.
+discarded: citation_*, quote_*, unsupported_by_document, conflicting_evidence, weak_evidence, deadline_not_grounded,
+party_not_grounded, not_an_obligation, unknown_field, other).
+
+Obligations are scored from the model's own grounded answers, before VaultAI drops repeats of rules obligations:
+model_obligations_correct counts those whose kind and due date equal an expected obligation's and whose party is the
+same party (a defined term such as "Client" matches the full name it stands for). grounded_value_rate uses the same
+grounded count. *_legacy keeps the earlier definitions, which looked only at obligations stored as new records.
+The documents list gives the same counts per sample with rejection codes and cited line ids, never text.
 
 Exit status is non-zero when a gate fails. Gates apply only to the default run (mock backend, text variant):
 they are the bar the rules must clear on the demo set and are not tuned to the current score. Other runs
@@ -42,11 +47,19 @@ sys.path.insert(0, str(BACKEND))
 
 from vaultai.app import build_context  # noqa: E402
 from vaultai.config import REPO_ROOT, load_settings  # noqa: E402
-from vaultai.devtools.evaluation import STRESS_LABELS, OracleModel, Recorder, rasterize_pdf, relabel_pdf  # noqa: E402
+from vaultai.devtools.evaluation import (  # noqa: E402
+    STRESS_LABELS,
+    OracleModel,
+    Recorder,
+    obligation_report,
+    rasterize_pdf,
+    relabel_pdf,
+)
 from vaultai.domain import ModelKind, Severity, Source, ValueType  # noqa: E402
 from vaultai.intake.ingest import ingest_bytes  # noqa: E402
 from vaultai.model import diagnostics  # noqa: E402
 from vaultai.model.factory import build_model  # noqa: E402
+from vaultai.parsing.layout import Doc, Line, Page  # noqa: E402
 from vaultai.model.mock import MockModel  # noqa: E402
 from vaultai.pipeline.process import process_document, request_processing  # noqa: E402
 from vaultai.schemas import SCHEMAS  # noqa: E402
@@ -153,6 +166,8 @@ def main() -> int:
         counts = Counter()
         statuses: Counter[str] = Counter()
         reasons: dict[str, dict[str, int]] = {key: {} for key in diagnostics.MODEL_MAPS}
+        obligation_reasons: Counter[str] = Counter()
+        documents = []
         rows = []
         with ctx.db() as conn:
             for rel, doc_id in docs.items():
@@ -178,11 +193,26 @@ def main() -> int:
                 counts["model_obligations"] += len(model_obligations)
                 expected_keys = {(o["kind"], o["due_date"], (o["party"] or "").casefold())
                                  for o in want.get("obligations", [])}
-                counts["model_obligations_correct"] += sum(key in expected_keys for key in model_obligations)
+                counts["model_obligations_correct_legacy"] += sum(key in expected_keys for key in model_obligations)
                 stored = conn.execute("SELECT metrics_json FROM doc_metrics WHERE doc_id = ?", (doc_id,)).fetchone()
                 model_metrics = diagnostics.normalize(json.loads(stored[0]) if stored else None)["model"]
                 for key, kind in diagnostics.MODEL_MAPS.items():
                     diagnostics.merge(reasons[key], model_metrics[key], kind)
+                stored_doc = Doc(tuple(
+                    Page(r["page_no"], r["width"], r["height"], r["text_method"],
+                         tuple(Line.from_json(ln) for ln in json.loads(r["lines_json"])))
+                    for r in conn.execute("SELECT * FROM pages WHERE doc_id = ? ORDER BY page_no", (doc_id,))))
+                rule_keys = {(r["kind"], r["line_id"]) for r in conn.execute(
+                    "SELECT kind, line_id FROM obligations WHERE doc_id = ? AND origin = 'rules'", (doc_id,))}
+                report = obligation_report(want.get("obligations", []),
+                                           [(task, raw) for name, task, raw in recorder.analyses if name == rel],
+                                           stored_doc, settings.date_order, rule_keys)
+                for key, value in (("obligations_expected", report.expected), ("obligations_proposed", report.proposed),
+                                   ("obligations_grounded", report.grounded), ("obligations_repeats", report.repeats),
+                                   ("obligations_duplicates", report.duplicates_of_rules),
+                                   ("obligations_correct", report.correct)):
+                    counts[key] += value
+                obligation_reasons.update(report.rejected)
 
                 type_ok = d["doc_type"] == want["doc_type"]
                 score["doc_type"][0] += type_ok
@@ -241,6 +271,18 @@ def main() -> int:
                 if "risky_clause_kinds" in want:
                     risky = {c["kind"] for c in clauses if c["risk"] != "none" and c["kind"] != "renewal"}
                     risky_note = "ok" if risky == set(want["risky_clause_kinds"]) else f"✗ {sorted(risky)}"
+                documents.append({
+                    "document": rel,
+                    "doc_type": d["doc_type"],
+                    "status": d["status"],
+                    "expected_status": want["expected_status"],
+                    "status_matches": status_ok,
+                    "issue_set_matches": issues_ok,
+                    "model_calls": dict(sorted(Counter(c.task for c in recorder.calls if c.doc == rel).items())),
+                    "model_output_rejections": {k: v for k, v in model_metrics["rejections_by_reason"].items() if v},
+                    "grounding_rejections": {k: v for k, v in model_metrics["grounding_rejections_by_reason"].items() if v},
+                    "obligations": {**report.to_json(), "kept": len(model_obligations)},
+                })
                 rows.append((rel, d["doc_type"], type_ok, len(want["fields"]) - len(misses), len(want["fields"]),
                              d["status"], want["expected_status"], issues_ok, sorted(issues),
                              sorted(want["expected_issue_codes"]), items_note, obl_note, risky_note, misses + notes))
@@ -282,7 +324,9 @@ def main() -> int:
         print(f"{name:12} {ok:>3}/{total:<3} {rate:6.1%}  gate {gate:.0%}  {mark}")
 
     n_docs = len(docs)
-    accepted = counts["model_values"] + counts["model_obligations"]
+    legacy_accepted = counts["model_values"] + counts["model_obligations"]
+    legacy_proposed = legacy_accepted + counts["ungrounded_value"]
+    accepted = counts["model_values"] + counts["obligations_grounded"]
     proposed = accepted + counts["ungrounded_value"]
     prompt_chars = [c.prompt_chars for c in calls]
     tokens = [c.prompt_tokens + (c.completion_tokens or 0) for c in calls if c.prompt_tokens is not None]
@@ -298,10 +342,18 @@ def main() -> int:
         "incorrect_fields": counts["incorrect_fields"],
         "model_values_accepted": counts["model_values"],
         "model_values_correct": counts["model_values_correct"],
+        "expected_obligations": counts["obligations_expected"],
+        "model_obligations_proposed": counts["obligations_proposed"],
+        "model_obligations_grounded": counts["obligations_grounded"],
+        "model_obligations_duplicates_of_rules": counts["obligations_duplicates"],
         "model_obligations_accepted": counts["model_obligations"],
-        "model_obligations_correct": counts["model_obligations_correct"],
+        "model_obligations_correct": counts["obligations_correct"],
+        "model_obligations_correct_legacy": counts["model_obligations_correct_legacy"],
+        "model_obligations_rejected": sum(obligation_reasons.values()),
+        "obligation_rejections_by_reason": dict(sorted(obligation_reasons.items())),
         "ungrounded_values_rejected": counts["ungrounded_value"],
         "grounded_value_rate": round(accepted / proposed, 4) if proposed else None,
+        "grounded_value_rate_legacy": round(legacy_accepted / legacy_proposed, 4) if legacy_proposed else None,
         "model_outputs_rejected": counts["model_output_rejected"],
         "model_output_rejections_by_reason": reasons["rejections_by_reason"],
         "model_failure_reasons": reasons["failure_reasons"],
@@ -324,10 +376,24 @@ def main() -> int:
         "status_distribution": dict(sorted(statuses.items())),
         "status_matches_expected": score["status"][0],
         "issue_sets_match_expected": score["issues"][0],
+        "documents": documents,
     }
+    with_obligations = [d for d in documents if d["obligations"]["expected"] or d["obligations"]["proposed"]]
+    if with_obligations:
+        print("\nModel obligations by document (rejection codes and line ids only, never text)")
+        print(f"{'document':{w}}  expected proposed grounded dup-rules kept correct rejected")
+        for d in with_obligations:
+            o = d["obligations"]
+            reasons_note = ", ".join(f"{k} {v}" for k, v in o["rejected_by_reason"].items())
+            print(f"{d['document']:{w}}  {o['expected']:>8} {o['proposed']:>8} {o['grounded']:>8} "
+                  f"{o['duplicates_of_rules']:>9} {o['kept']:>4} {o['correct']:>7} {o['rejected']:>8}  {reasons_note}")
+            if verbose:
+                for line, reason in o["rejected_lines"]:
+                    print(f"{'':{w}}    {line or '(no line id)'} {reason}")
     print()
     for key, value in metrics.items():
-        print(f"{key:28} {value}")
+        if key != "documents":
+            print(f"{key:28} {value}")
     if args.json:
         args.json.write_text(json.dumps(metrics, indent=2) + "\n")
     print(f"\nprocessed {n_docs} documents in {elapsed:.1f}s with {ctx.model.name}")

@@ -166,11 +166,12 @@ def ground_extract(raw: object, task: ExtractTask, doc: Doc, existing: Mapping[s
         if spec is None:
             issues.append(_ungrounded(GroundingReason.UNKNOWN_FIELD, "value"))
             continue
-        if not _cited(doc, allowed, cited):
-            issues.append(_ungrounded(GroundingReason.INVALID_CITATION, "value", spec.key))
+        if cited is None or not _cited(doc, allowed, cited):
+            reason = GroundingReason.CITATION_MISSING if cited is None else GroundingReason.CITATION_LINE_NOT_SHOWN
+            issues.append(_ungrounded(reason, "value", spec.key))
             continue
         if not quote_on_line(doc, allowed, cited, f.quote):
-            issues.append(_ungrounded(GroundingReason.UNSUPPORTED_BY_DOCUMENT, "value", spec.key))
+            issues.append(_ungrounded(quote_problem(doc, allowed, [doc.by_id[cited]], f.quote), "value", spec.key))
             continue
         value = typed(spec.value_type, f.value, f.quote or "", spec.options, date_order)
         if value is None:
@@ -278,6 +279,54 @@ def sentence_around(text: str, start: int, end: int) -> str:
     return text[begin:stop].strip()
 
 
+def resolve_span(doc: Doc, allowed: set[str], start_raw: str | None, end_raw: str | None
+                 ) -> tuple[list[Line] | None, GroundingReason | None]:
+    """The cited lines, or the citation code that explains why there are none."""
+    start = line_id(start_raw)
+    if start is None:
+        return None, GroundingReason.CITATION_MISSING
+    if not _cited(doc, allowed, start):
+        return None, GroundingReason.CITATION_LINE_NOT_SHOWN
+    end = line_id(end_raw)
+    if end is None or end == start:
+        return [doc.by_id[start]], None  # an end the model left empty or wrote unreadably means one line, as before
+    if end in doc.by_id and end not in allowed:
+        return None, GroundingReason.CITATION_LINE_NOT_SHOWN
+    span = cited_span(doc, allowed, start, end)
+    return (span, None) if span else (None, GroundingReason.CITATION_NON_ADJACENT)
+
+
+_MARKUP = re.compile(r"\[\s*p\d+\.l\d+|<<|>>")
+
+
+def quote_problem(doc: Doc, allowed: set[str], span: list[Line], quote: str | None) -> GroundingReason:
+    """How a quote that is not on its cited lines fails, as a code. Nothing about the quote itself is kept."""
+    text = canon(quote or "")
+    if text and _MARKUP.search(text):
+        return GroundingReason.QUOTE_INCLUDES_MARKUP
+    if "..." in text:
+        return GroundingReason.QUOTE_ELIDED
+    if not text:
+        return GroundingReason.QUOTE_MISMATCH
+    page = [ln for ln in doc.page(page_of(span[0].id)).lines]
+    first = [ln.id for ln in page].index(span[0].id)
+    for extra in range(len(span), MAX_SPAN_LINES):
+        if first + extra < len(page):
+            longer = cited_span(doc, allowed, span[0].id, page[first + extra].id)
+            if longer and quote_position(longer, quote):
+                return GroundingReason.QUOTE_NEEDS_END_LINE
+    for p in doc.pages:
+        for i, ln in enumerate(p.lines):
+            if ln.id not in allowed or ln.id == span[0].id:
+                continue
+            for extra in range(MAX_SPAN_LINES):
+                if i + extra < len(p.lines):
+                    other = cited_span(doc, allowed, ln.id, p.lines[i + extra].id)
+                    if other and quote_position(other, quote):
+                        return GroundingReason.QUOTE_WRONG_LINE
+    return GroundingReason.QUOTE_MISMATCH
+
+
 def _span_evidence(span: list[Line]) -> Evidence:
     if len(span) == 1:
         return evidence(span[0])
@@ -338,15 +387,72 @@ def party_check(party: str, quote: str, parties: tuple[tuple[str, str], ...], kn
     return "known" if wanted in known_text else "unknown"
 
 
+def obligation_outcomes(proposed: list[output.ObligationOut], task: AnalyzeTask, doc: Doc, date_order: str
+                        ) -> list[tuple[str | None, ObligationRec | Issue | None]]:
+    """(cited line id, outcome) for each proposed obligation, in order.
+
+    The outcome is the record to keep, the rejection Issue (with its stable code), or None for a repeat of a duty
+    already kept from this reply. The line id is the normalized citation handle, or None when there is none.
+    """
+    allowed = {ln.id for ln in task.lines} | fact_line_ids(task)
+    tables = {ln.id: ln.table for ln in task.lines if ln.table}
+    known_text = canon(" ".join(ln.text for ln in task.lines) + " " + " ".join(task.known_facts.values())).casefold()
+    out: list[tuple[str | None, ObligationRec | Issue | None]] = []
+    seen: set[tuple] = set()
+    for o in proposed:
+        cited = line_id(o.line_id)
+        span, citation = resolve_span(doc, allowed, o.line_id, o.end_line_id)
+        if span is None:
+            out.append((cited, _ungrounded(citation, "obligation")))
+            continue
+        found = quote_position(span, o.quote)
+        if found is None:
+            out.append((cited, _ungrounded(quote_problem(doc, allowed, span, o.quote), "obligation")))
+            continue
+        quote = canon(o.quote)
+        sentence = sentence_around(*found)
+        if not is_duty(o.kind, sentence, tables.get(span[0].id)):
+            out.append((cited, _ungrounded(GroundingReason.NOT_AN_OBLIGATION, "obligation")))
+            continue
+        party = " ".join(o.party.split()) if o.party else None
+        support = party_check(party, sentence, task.parties, known_text) if party else "unknown"
+        if support == "other":
+            out.append((cited, _ungrounded(GroundingReason.PARTY_NOT_GROUNDED, "responsible party")))
+            continue
+        if support == "unknown":
+            party = None
+        deadline = canon(o.deadline_text) if o.deadline_text and canon(o.deadline_text) else None
+        if deadline and _matchable(deadline) not in sentence:
+            out.append((cited, _ungrounded(GroundingReason.DEADLINE_NOT_GROUNDED, "deadline")))
+            continue
+        due = None
+        if o.due_date:
+            value = typed(ValueType.DATE, o.due_date, deadline or quote, (), date_order)
+            if value is None:
+                out.append((cited, _ungrounded(GroundingReason.DEADLINE_NOT_GROUNDED, "deadline")))
+                continue
+            due = date.fromisoformat(value[0])
+        description = " ".join(o.description.split())
+        if not _faithful(description, sentence) or not _supported(description, sentence, date_order):
+            description = quote
+        if deadline and _matchable(deadline) not in _matchable(description):
+            description = f"{description} ({deadline})"
+        key = (o.kind, span[0].id, _matchable(quote).casefold())
+        if key in seen:
+            out.append((cited, None))
+            continue
+        seen.add(key)
+        out.append((cited, ObligationRec(o.kind, party, description, due, _span_evidence(span), FieldOrigin.MODEL)))
+    return out
+
+
 def ground_analyze(raw: object, task: AnalyzeTask, doc: Doc, date_order: str
                    ) -> tuple[list[Claim], list[ObligationRec], list[Issue]]:
     out = output.parse(task, raw)
     if out is None:
         return [], [], [rejected(failure_reason(raw))]
     allowed = {ln.id for ln in task.lines} | fact_line_ids(task)
-    tables = {ln.id: ln.table for ln in task.lines if ln.table}
     facts = " ".join(task.known_facts.values())
-    known_text = canon(" ".join(ln.text for ln in task.lines) + " " + facts).casefold()
     issues: list[Issue] = []
     claims = []
     for c in out.claims:
@@ -357,50 +463,9 @@ def ground_analyze(raw: object, task: AnalyzeTask, doc: Doc, date_order: str
         if _ADVICE.search(c.text) or not _supported(c.text, sources, date_order):
             continue
         claims.append(Claim(" ".join(c.text.split()), tuple(evidence(ln) for ln in cited)))
-    obligations = []
-    seen: set[tuple] = set()
-    for o in out.obligations:
-        span = cited_span(doc, allowed, line_id(o.line_id), line_id(o.end_line_id) if o.end_line_id else None)
-        if span is None:
-            issues.append(_ungrounded(GroundingReason.INVALID_CITATION, "obligation"))
-            continue
-        found = quote_position(span, o.quote)
-        if found is None:
-            issues.append(_ungrounded(GroundingReason.OBLIGATION_NOT_GROUNDED, "obligation"))
-            continue
-        quote = canon(o.quote)
-        sentence = sentence_around(*found)
-        if not is_duty(o.kind, sentence, tables.get(span[0].id)):
-            issues.append(_ungrounded(GroundingReason.NOT_AN_OBLIGATION, "obligation"))
-            continue
-        party = " ".join(o.party.split()) if o.party else None
-        support = party_check(party, sentence, task.parties, known_text) if party else "unknown"
-        if support == "other":
-            issues.append(_ungrounded(GroundingReason.PARTY_NOT_GROUNDED, "responsible party"))
-            continue
-        if support == "unknown":
-            party = None
-        deadline = canon(o.deadline_text) if o.deadline_text and canon(o.deadline_text) else None
-        if deadline and _matchable(deadline) not in sentence:
-            issues.append(_ungrounded(GroundingReason.DEADLINE_NOT_GROUNDED, "deadline"))
-            continue
-        due = None
-        if o.due_date:
-            value = typed(ValueType.DATE, o.due_date, deadline or quote, (), date_order)
-            if value is None:
-                issues.append(_ungrounded(GroundingReason.DEADLINE_NOT_GROUNDED, "deadline"))
-                continue
-            due = date.fromisoformat(value[0])
-        description = " ".join(o.description.split())
-        if not _faithful(description, sentence) or not _supported(description, sentence, date_order):
-            description = quote
-        if deadline and _matchable(deadline) not in _matchable(description):
-            description = f"{description} ({deadline})"
-        key = (o.kind, span[0].id, _matchable(quote).casefold())
-        if key in seen:
-            continue
-        seen.add(key)
-        obligations.append(ObligationRec(o.kind, party, description, due, _span_evidence(span), FieldOrigin.MODEL))
+    outcomes = obligation_outcomes(out.obligations, task, doc, date_order)
+    obligations = [r for _, r in outcomes if isinstance(r, ObligationRec)]
+    issues += [r for _, r in outcomes if isinstance(r, Issue)]
     return claims, obligations, issues
 
 

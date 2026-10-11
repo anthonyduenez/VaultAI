@@ -417,8 +417,9 @@ Each run prints, and with `--json` saves:
 - diagnostics as counts by stable code, never text:
   - `model_failure_reasons` counts every refused attempt by code (`empty_content`, `invalid_json`, `schema_invalid`, `response_too_large`);
   - `model_output_rejections_by_reason` counts the same codes for replies still unusable after the repair attempt;
-  - `grounding_rejections_by_reason` counts well-formed answers that the evidence check discarded, by code (`invalid_citation`, `unsupported_by_document`, `conflicting_evidence`, `weak_evidence`, `obligation_not_grounded`, `deadline_not_grounded`, `party_not_grounded`, `not_an_obligation`, `unknown_field`, `other`);
-  - `model_obligations_accepted` and `model_obligations_correct` count model obligations kept, and how many match an expected obligation's kind, due date, and party.
+  - `grounding_rejections_by_reason` counts well-formed answers that the evidence check discarded, by code (`citation_missing`, `citation_line_not_shown`, `citation_non_adjacent`, `quote_includes_markup`, `quote_elided`, `quote_needs_end_line`, `quote_wrong_line`, `quote_mismatch`, `unsupported_by_document`, `conflicting_evidence`, `weak_evidence`, `deadline_not_grounded`, `party_not_grounded`, `not_an_obligation`, `unknown_field`, `other`);
+  - the model's obligations, proposed, grounded, rejected by code, and repeating a rules obligation; `model_obligations_correct` counts grounded ones that match an expected obligation's kind, due date, and party (a defined term such as "Client" matches the full name it stands for);
+  - a `documents` list with the same counts per sample, each rejected obligation's cited line id and code, and whether the status and issue set match.
 
   The same counts are stored per document in `doc_metrics`, summed in `GET /api/system/metrics`, and shown on the dashboard.
 
