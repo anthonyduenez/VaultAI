@@ -31,6 +31,8 @@ class GroundingReason(StrEnum):
     WEAK_EVIDENCE = "weak_evidence"
     OBLIGATION_NOT_GROUNDED = "obligation_not_grounded"
     DEADLINE_NOT_GROUNDED = "deadline_not_grounded"
+    PARTY_NOT_GROUNDED = "party_not_grounded"
+    NOT_AN_OBLIGATION = "not_an_obligation"
     UNKNOWN_FIELD = "unknown_field"
     OTHER = "other"
 

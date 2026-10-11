@@ -57,6 +57,7 @@ class AnalyzeTask:
     doc_type: DocType
     lines: tuple[DocLine, ...]
     known_facts: dict[str, str] = field(default_factory=dict)
+    parties: tuple[tuple[str, str], ...] = ()  # (term as used in the text, full name), e.g. ("Client", "Harborview LLC")
 
 
 @dataclass(frozen=True)

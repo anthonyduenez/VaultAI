@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from vaultai.domain import DocType
 
-TEMPLATE_VERSION = "2026.10.2"
+TEMPLATE_VERSION = "2026.10.3"
 
 
 @dataclass(frozen=True)
@@ -37,12 +37,8 @@ _CURRENCY = "ISO currency code of the amounts (USD, EUR, ...), only when a symbo
 
 LEGAL_ANALYSIS = """This is issue spotting for a human reviewer. Report what the text says; do not give legal advice.
 - Never say a clause is invalid, illegal, unenforceable, unfair, or risky, and never recommend an action. VaultAI's rules decide which clauses to flag; their flags are listed under facts.
-- obligations: every duty, deadline, renewal or non-renewal notice term, termination right, payment term, and signature or acceptance requirement. One entry per duty.
-  party: the party who must act, using the name or defined term printed in the document ("Client", "Provider"), or null.
-  description: what the text requires, using the document's own words.
-  due_date: only when a calendar date is printed in the quoted line; otherwise null. Never compute a date from a period such as "within 30 days".
-  line_id and quote: the line that states the duty and an exact copy of the part that states it.
-- claims: at most 6 short factual sentences about the parties, term, fees, renewal, termination, and signatures, each citing the line ids it relies on."""
+- Look for payment terms, deliverables, notice and non-renewal terms, termination terms, duties that survive the agreement, and signature or acceptance requirements.
+- Claims are about the parties, term, fees, renewal, termination, and signatures."""
 
 TEMPLATES: dict[str, Template] = {t.key: t for t in (
     Template(
@@ -188,8 +184,8 @@ TEMPLATES: dict[str, Template] = {t.key: t for t in (
             "review_date": "the next scheduled review date.",
         },
         """This is issue spotting for a human reviewer. Report what the text says; do not give legal or HR advice.
-- obligations: each rule people must follow. party: who must follow it as printed ("Employees"), or null. description: the rule in the document's own words. due_date: only a printed calendar date in the quoted line, else null.
-- claims: at most 6 short factual sentences about scope, ownership, dates, and the main rules, each citing line ids.""",
+- Each rule people must follow is an obligation. party: who must follow it as printed ("Employees"). A rule that only describes how something works, or what is not reimbursed, is not an obligation.
+- Claims are about scope, ownership, dates, and the main rules.""",
         legal=True,
     ),
     Template(
@@ -200,8 +196,8 @@ TEMPLATES: dict[str, Template] = {t.key: t for t in (
             "date": "the date the message was written or sent. Not a deadline in the body.",
             "subject": "the subject line.",
         },
-        """- obligations: each request or requirement in the message. party: who must act as printed, or null. due_date: only a printed calendar date in the quoted line, else null.
-- claims: at most 4 short factual sentences about who wrote to whom, about what, and what is asked, each citing line ids.""",
+        """- Each request or requirement the message places on its readers is an obligation. Background and scheduling information is not.
+- Claims are about who wrote to whom, about what, and what is asked.""",
     ),
     Template(
         "general", "business document", "a business document",
@@ -216,8 +212,8 @@ TEMPLATES: dict[str, Template] = {t.key: t for t in (
             "currency": _CURRENCY,
             "reference": "the document's reference or identifier.",
         },
-        """- obligations: each duty or deadline the document states. due_date: only a printed calendar date in the quoted line, else null.
-- claims: at most 4 short factual sentences describing the document, each citing line ids.""",
+        """- Each duty or deadline the document states is an obligation.
+- Claims describe the document.""",
     ),
 )}
 

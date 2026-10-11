@@ -12,7 +12,10 @@ Recorder wraps any adapter and counts calls, prompt size, latency, and token
 usage. OracleModel is a perfect reader limited to the lines it is shown: it
 answers a field only when the expected value is printed on one of those lines.
 Its score is an upper bound on what any model could extract from the same
-context. It is not a language model and its numbers are not Nemotron's.
+context. For analysis it proposes each expected obligation that has a printed
+date, quoted as the sentence holding that date, which checks that the
+obligation validator accepts correct obligations. It is not a language model
+and its numbers are not Nemotron's.
 """
 
 from __future__ import annotations
@@ -213,5 +216,38 @@ class OracleModel:
                     out.append({"key": spec.key, "value": gold, "line_id": line.id, "quote": line.text, "confidence": 0.9})
             return {"fields": out}
         if isinstance(task, AnalyzeTask):
-            return {"claims": [], "obligations": []}
+            gold = want.get("obligations", []) if want.get("doc_type") == task.doc_type.value else []
+            return {"claims": [], "obligations": [o for g in gold if (o := self._obligation(task, g))]}
         return {"lines": []}
+
+    def _obligation(self, task: AnalyzeTask, gold: Mapping) -> dict | None:
+        """The expected obligation, quoted as the whole printed sentence that holds its date, from 1-3 adjacent lines.
+
+        Only dated obligations are answered: without a printed date there is no unambiguous line to quote. The
+        sentence is chosen without VaultAI's duty check, so a rejection here means the validator refused a correct one.
+        """
+        from vaultai.model.grounding import canon, sentence_around
+
+        if not gold.get("due_date"):
+            return None
+        due = date.fromisoformat(gold["due_date"])
+        lines = list(task.lines)
+        for size in (1, 2, 3):
+            for i in range(len(lines) - size + 1):
+                window = lines[i:i + size]
+                if any(b.page != a.page or int(b.id.split(".l")[1]) != int(a.id.split(".l")[1]) + 1
+                       for a, b in zip(window, window[1:])):
+                    continue
+                texts = [canon(ln.text) for ln in window]
+                joined = " ".join(texts)
+                hit = next((h for h in find_dates(joined, self.date_order) if h.value == due), None)
+                if hit is None:
+                    continue
+                sentence = sentence_around(joined, hit.start, hit.start + len(hit.raw))
+                start = joined.find(sentence)
+                if start >= len(texts[0]) or (size > 1 and start + len(sentence) <= len(joined) - len(texts[-1])):
+                    continue
+                return {"kind": gold["kind"], "party": gold.get("party"), "description": gold.get("description") or sentence,
+                        "deadline_text": hit.raw, "due_date": gold["due_date"], "line_id": window[0].id,
+                        "end_line_id": window[-1].id if size > 1 else None, "quote": sentence}
+        return None

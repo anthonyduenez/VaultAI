@@ -53,11 +53,16 @@ class ClaimOut(_Out):
 
 
 class ObligationOut(_Out):
+    """One duty. `end_line_id` is set only when the quote continues onto the next line or two; replies cached before
+    `deadline_text` and `end_line_id` existed still validate."""
+
     kind: ObligationKind
     party: str | None = Field(default=None, max_length=120)
     description: str = Field(min_length=1, max_length=400)
+    deadline_text: str | None = Field(default=None, max_length=200)
     due_date: str | None = Field(default=None, max_length=40)
     line_id: str = Field(max_length=MAX_ID)
+    end_line_id: str | None = Field(default=None, max_length=MAX_ID)
     quote: str = Field(min_length=1, max_length=MAX_TEXT)
 
 
@@ -104,8 +109,10 @@ def json_schema(task: Task) -> dict:
             "kind": {"type": "string", "enum": [k.value for k in ObligationKind]},
             "party": _nullable({"type": "string"}),
             "description": {"type": "string"},
+            "deadline_text": _nullable({"type": "string"}),
             "due_date": _nullable({"type": "string"}),
             "line_id": {"type": "string"},
+            "end_line_id": _nullable({"type": "string"}),
             "quote": {"type": "string"},
         })
         return _object({"claims": {"type": "array", "items": claim},

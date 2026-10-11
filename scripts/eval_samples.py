@@ -17,7 +17,8 @@ Diagnostics in the output are counts by stable code, never text: model_failure_r
 empty_content, invalid_json, schema_invalid, response_too_large), model_output_rejections_by_reason (replies still
 unusable after the repair attempt), and grounding_rejections_by_reason (well-formed answers the evidence check
 discarded: invalid_citation, unsupported_by_document, conflicting_evidence, weak_evidence, obligation_not_grounded,
-deadline_not_grounded, unknown_field, other).
+deadline_not_grounded, party_not_grounded, not_an_obligation, unknown_field, other). model_obligations_correct counts
+model obligations whose kind, due date, and party match an expected obligation.
 
 Exit status is non-zero when a gate fails. Gates apply only to the default run (mock backend, text variant):
 they are the bar the rules must clear on the demo set and are not tuned to the current score. Other runs
@@ -172,8 +173,12 @@ def main() -> int:
                 counts["processing_ms"] += d["processing_ms"] or 0
                 for code in MODEL_ISSUES:
                     counts[code] += all_issues.count(code)
-                counts["model_obligations"] += conn.execute(
-                    "SELECT COUNT(*) FROM obligations WHERE doc_id = ? AND origin = 'model'", (doc_id,)).fetchone()[0]
+                model_obligations = [(r["kind"], r["due_date"], (r["party"] or "").casefold()) for r in conn.execute(
+                    "SELECT kind, due_date, party FROM obligations WHERE doc_id = ? AND origin = 'model'", (doc_id,))]
+                counts["model_obligations"] += len(model_obligations)
+                expected_keys = {(o["kind"], o["due_date"], (o["party"] or "").casefold())
+                                 for o in want.get("obligations", [])}
+                counts["model_obligations_correct"] += sum(key in expected_keys for key in model_obligations)
                 stored = conn.execute("SELECT metrics_json FROM doc_metrics WHERE doc_id = ?", (doc_id,)).fetchone()
                 model_metrics = diagnostics.normalize(json.loads(stored[0]) if stored else None)["model"]
                 for key, kind in diagnostics.MODEL_MAPS.items():
@@ -294,6 +299,7 @@ def main() -> int:
         "model_values_accepted": counts["model_values"],
         "model_values_correct": counts["model_values_correct"],
         "model_obligations_accepted": counts["model_obligations"],
+        "model_obligations_correct": counts["model_obligations_correct"],
         "ungrounded_values_rejected": counts["ungrounded_value"],
         "grounded_value_rate": round(accepted / proposed, 4) if proposed else None,
         "model_outputs_rejected": counts["model_output_rejected"],

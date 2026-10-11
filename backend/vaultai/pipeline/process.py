@@ -26,7 +26,7 @@ from pathlib import Path
 
 from vaultai import db, repo
 from vaultai.analysis import ClauseRec, ObligationRec
-from vaultai.analysis.contracts import analyze
+from vaultai.analysis.contracts import analyze, party_terms
 from vaultai.classify import Classification, classify_rules, from_hint, scores, span_text
 from vaultai.context import AppContext
 from vaultai.domain import (
@@ -388,7 +388,8 @@ def _summarize(ctx: AppContext, doc: Doc, view: tuple[DocLine, ...], doc_type: D
     if doc_type in ANALYZED_TYPES and model.llm:
         flags = {f"Rules flagged {c.heading} [{c.evidence.line_id}]": c.risk_reason or c.risk.value
                  for c in run.clauses if c.risk is not ClauseRisk.NONE and c.evidence and c.evidence.line_id}
-        tasks = [AnalyzeTask(doc_type, chunk, {**facts, **flags})
+        parties = party_terms(doc, fields)
+        tasks = [AnalyzeTask(doc_type, chunk, {**facts, **flags}, parties)
                  for chunk in context.chunks(context.for_analysis(view, doc, ctx.settings.date_order), _analysis_budget(ctx))]
         with ThreadPoolExecutor(max_workers=max(1, min(len(tasks), ctx.settings.model_concurrency))) as pool:
             answers = list(pool.map(model.ask, tasks))
@@ -401,7 +402,8 @@ def _summarize(ctx: AppContext, doc: Doc, view: tuple[DocLine, ...], doc_type: D
                 claims.setdefault(c.text, SummaryClaim(text=c.text, evidence=list(c.evidence)))
             obligations.extend(obs)
     known = {(o.kind, o.evidence.line_id if o.evidence else None) for o in run.obligations}
-    added = [o for o in obligations if (o.kind, o.evidence.line_id if o.evidence else None) not in known]
+    added = list({(o.kind, o.evidence.line_id if o.evidence else None, o.description): o for o in obligations
+                  if (o.kind, o.evidence.line_id if o.evidence else None) not in known}.values())
     run.obligations.extend(added)
     if claims or added:
         run.route = Route.MODEL if run.route is Route.FAST else run.route

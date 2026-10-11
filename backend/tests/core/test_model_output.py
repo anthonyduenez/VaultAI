@@ -168,7 +168,7 @@ def test_model_calls_tokens_and_retries_reach_the_metrics(settings):
         stored = json.loads(conn.execute("SELECT metrics_json FROM doc_metrics WHERE doc_id = ?", (doc_id,)).fetchone()[0])
     assert stored["model"]["calls"] == {"ExtractTask": 1}
     assert (stored["model"]["attempts"], stored["model"]["retries"], stored["model"]["prompt_tokens"]) == (2, 1, 1020)
-    assert stored["model"]["prompt_versions"] == ["2026.10.2/invoice@2026.10.2"]
+    assert stored["model"]["prompt_versions"] == ["2026.10.3/invoice@2026.10.3"]
     assert set(stored["stages_ms"]) == {"read", "classify", "extract", "analyze"}
     m = compute_metrics(ctx)
     assert (m.model_calls, m.model_retries, m.model_prompt_tokens, m.model_completion_tokens) == (1, 1, 1020, 45)

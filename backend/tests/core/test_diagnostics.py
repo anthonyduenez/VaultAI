@@ -28,7 +28,8 @@ GOOD = json.dumps({"fields": [{"key": "vendor", "value": "Zephyr Tools LLC", "li
                                "quote": "Zephyr Tools LLC", "confidence": 0.9}]})
 FAILURE_CODES = {"empty_content", "invalid_json", "schema_invalid", "response_too_large"}
 GROUNDING_CODES = {"invalid_citation", "unsupported_by_document", "conflicting_evidence", "weak_evidence",
-                   "obligation_not_grounded", "deadline_not_grounded", "unknown_field", "other"}
+                   "obligation_not_grounded", "deadline_not_grounded", "party_not_grounded", "not_an_obligation",
+                   "unknown_field", "other"}
 
 
 def _local(settings, **changes):

@@ -4,7 +4,7 @@ This page records what changed in VaultAI's document-understanding pipeline, wha
 
 ## Read this first
 
-**No Nemotron numbers are reported here.** All work was done on the development Mac, where no Nemotron server was reachable. The improvements below were measured with two stand-ins:
+**No Nemotron numbers were measured on the development Mac.** All work was done there, and no Nemotron server was reachable from it. The only Nemotron numbers on this page are the GX10 baseline the operator reported, under [Obligation extraction](#obligation-extraction). The improvements below were measured with two stand-ins:
 
 - the **mock** backend (rules only, no model);
 - an **oracle** that answers a field only when the expected value is printed on a line VaultAI sent. The oracle measures what VaultAI gives the model (context recall, call count, prompt size) and what VaultAI does with an answer (grounding, confidence, routing). It is a perfect reader, so it says nothing about how often Nemotron reads correctly.
@@ -123,16 +123,88 @@ Every rejection is recorded as a stable code with a count, per document in `doc_
 | `invalid_json` | same | The content was not a JSON object | Structured output support on the server |
 | `schema_invalid` | same | A JSON object that is not the requested structure, or a type outside the allowed list | Prompt or schema |
 | `response_too_large` | same | The reply exceeded 1 MB and was cut off. It is not retried. | Server limits |
-| `invalid_citation` | `grounding_rejections_by_reason` | Line id missing, malformed, not shown to the model, or not in the document | Prompt: cite shown ids only |
+| `invalid_citation` | `grounding_rejections_by_reason` | Line id missing, malformed, not shown to the model, or not in the document; for an obligation, also an `end_line_id` that is not one or two lines after `line_id` on the same page, or a span that crosses a quarantined line | Prompt: cite shown ids only |
 | `unsupported_by_document` | same | The quote is not on the cited line, or the value does not read as its type inside the quote | Prompt: copy exactly; possibly tuning |
 | `conflicting_evidence` | same | Two different answers for one field | Prompt or context |
 | `weak_evidence` | same | Calibrated confidence below 0.40, usually poor OCR | OCR |
-| `obligation_not_grounded` | same | An obligation's quote is not on its cited line | Prompt: quote one line exactly |
-| `deadline_not_grounded` | same | An obligation's due date is not printed in its quote, often computed from "within N days" | Prompt: printed dates only |
+| `obligation_not_grounded` | same | An obligation's quote is not copied exactly from its cited line or lines | Prompt: copy exactly, use `end_line_id` for a wrapped sentence |
+| `deadline_not_grounded` | same | An obligation's `deadline_text` is not in its sentence, or its `due_date` is not printed in the deadline text (or the quote), often a date computed from "within N days" | Prompt: relative deadlines go in `deadline_text` only |
+| `party_not_grounded` | same | The sentence names a different party before its binding verb than the one the model gave | Prompt: party as printed |
+| `not_an_obligation` | same | The quoted sentence has no binding language for its kind: a permission ("may"), a description, or background | Prompt: duties only |
 | `unknown_field` | same | A key that was not requested | Schema enforcement on the server |
 | `other` | same | A discarded value without a recognized code | Investigate |
 
 `model_failure_reasons` counts every refused attempt, including ones the repair turn recovered. `model_output_rejections_by_reason` counts only replies that stayed unusable. Its total equals `model_outputs_rejected`.
+
+## Obligation extraction
+
+### GX10 baseline
+
+The operator reported these numbers from the GX10 run on 2026-10-11, at commit `e564e2b` with Nemotron 3.5 Lightning. They were not reproduced on the development Mac.
+
+| Variant | Required fields | All fields | Grounded-value rate | `obligation_not_grounded` | `deadline_not_grounded` |
+| --- | --- | --- | --- | --- | --- |
+| text | 100% | 100% | 45% | 11 | not reported |
+| stress | 98.18% | 99.35% | 84.09% | 3 | 4 |
+| OCR | 94.55% | 94.77% | 50% | 10 | not reported |
+
+Field extraction holds up. The low grounded-value rates come from obligations, which only the analysis task produces. On the text variant, no field needs the model, so every rejected value there is an obligation or a deadline.
+
+### Why prompt, context, and grounding come before tuning
+
+Before this change, a correct obligation could be refused for reasons that have nothing to do with what the model knows:
+
+1. **Wrapped sentences.** A contract duty usually wraps onto the next line, and the old schema allowed a quote from one line only. A complete, exact quote of the sentence was refused as `obligation_not_grounded`.
+2. **Relative deadlines.** "Within thirty (30) days of receipt" had nowhere to go but `due_date`, so a model that filled it in was refused as `deadline_not_grounded`.
+3. **Typography.** A curly apostrophe in the document against a straight one in the quote failed the exact match.
+4. **No duty definition.** The old prompt asked for "obligations and deadlines" in one line inside a summary task. It did not separate duties from permissions, descriptions, or background.
+
+Each of these is a contract between VaultAI and the model, not a gap in the model's knowledge, so each is fixed here first. Fine-tuning stays off the table until the GX10 numbers after this change show what is left.
+
+### What changed
+
+- **A dedicated obligation task.** The analysis prompt is now an obligation task with a short summary on the side. It says what counts as binding language and what does not (permissions, descriptions, background, definitions, recommendations, summaries). It asks for one entry per duty and lists the document's parties and defined terms, such as `Client = Harborview Logistics LLC`, taken from the preamble and the extracted fields.
+- **Explicit citations.** The prompt has rules for citing: the line where the quote starts; ids shown only; never a page, a layout note, or a line that only mentions the topic; and leaving out anything that cannot be quoted. `end_line_id` lets a quote continue onto one or two following lines.
+- **Deadlines.**
+  - `deadline_text` holds the deadline words as printed, such as "within thirty (30) days of receipt". It is appended to the stored description.
+  - `due_date` must be printed inside the deadline text, or inside the quote when there is no deadline text. VaultAI never derives a calendar date from a relative deadline.
+- **Validation.** VaultAI refuses an obligation when:
+  - the citation or span is not valid;
+  - the quote is not exact (curly quotes and dashes match their plain forms; nothing else is relaxed);
+  - the sentence holding the quote has no binding language for its kind (`not_an_obligation`);
+  - the sentence's subject names a different party (`party_not_grounded`);
+  - the deadline text or due date is not printed (`deadline_not_grounded`).
+
+  A party the document never mentions is dropped rather than kept. A description that adds a word, amount, or date not in the sentence is replaced by the quote. Repeated duties are kept once.
+- **Context.** The analysis context was already the paragraphs with duties, dates, or amounts, plus clause headings, signature blocks, and table notes. Only the parties line was added. Prompts grew by about 1,700 characters per analysis call.
+
+The binding-language check is a necessary condition, not a classifier. It refuses a "may" sentence or a plain description, but it cannot tell whether a "shall" sentence was read correctly. That part is still the reviewer's.
+
+### Local evidence
+
+The oracle proposes every expected obligation whose date is printed, quoting the whole sentence that holds the date, without using VaultAI's duty check to choose it.
+
+| Variant | Expected dated obligations | Proposed | Rejected | Kept as new | Duplicates of rule obligations |
+| --- | --- | --- | --- | --- | --- |
+| text | 9 | 8 | 0 | 3 | 5 |
+| stress | 9 | 8 | 0 | 3 | 5 |
+| OCR | 9 | 8 | 0 | 3 | 5 |
+
+- **The validator refuses no correct obligation.** That includes the letter's three-line deliverable sentence.
+- **The ninth is not quotable.** The MSA's non-renewal notice date (2026-11-01) is computed from "sixty (60) days before the end", so no exact quote exists.
+- **The adversarial cases are unit tests.** Wrong parties, permissions, computed dates, invented ids, and malformed objects are covered in `backend/tests/core/test_obligations.py`.
+- **Nothing else moved.** Field accuracy, statuses, issue sets, and model calls on the mock and oracle runs are unchanged.
+
+### What to look for on the GX10
+
+Rerun `./scripts/run_nemotron_evals.sh`, then compare `grounding_rejections_by_reason`, `model_obligations_accepted`, `model_obligations_correct`, and the grounded-value rate with the baseline above.
+
+- `obligation_not_grounded` and `deadline_not_grounded` should fall if the causes above were the main ones.
+- `not_an_obligation` and `party_not_grounded` are new. A count there is an unsupported obligation refused, not a regression.
+
+Because those new refusals also count against the grounded-value rate, the rate alone is not the measure. The aim is more correct obligations accepted and none unsupported.
+
+Until those numbers exist, this change is not an improvement in Nemotron's scores.
 
 ## Remaining failure modes
 
@@ -166,7 +238,7 @@ Keep the bundled samples, the stress variants, and any feedback from documents t
 
 **Weight fine-tuning is not justified now.** The reasons:
 
-1. **There is no measurement of the base model to improve on.** Fine-tuning needs evidence that a well-prompted Nemotron still fails on the right context. That evidence does not exist yet.
+1. **The GX10 baseline measures VaultAI's obligation contract as much as the model.** Field extraction is at 94.5–100% of required fields. The low grounded-value rates come from obligation and deadline citations ([Obligation extraction](#obligation-extraction)). Wrapped sentences, relative deadlines, and typography were format limits on VaultAI's side and are fixed first. Fine-tuning needs evidence that a well-prompted Nemotron still fails on the right context. That evidence does not exist yet.
 2. **The failures that were measured are not model failures.**
    - Signatures on scans are a vision and OCR problem.
    - Small text is an OCR problem.

@@ -55,7 +55,7 @@ def test_only_human_approved_corrections_become_ground_truth(settings):
     assert record["evidence"]["text"] == "Payable to Zephyr Tools LLC" and record["evidence"]["line_id"].startswith("p1.")
     assert record["review"] == {"decision": "approved", "approval_kind": "human", "approved_at": db.iso(NOW),
                                 "edited_at": db.iso(NOW)}
-    assert record["model"]["name"] == "scripted" and record["model"]["prompt_versions"] == ["2026.10.2/invoice@2026.10.2"]
+    assert record["model"]["name"] == "scripted" and record["model"]["prompt_versions"] == ["2026.10.3/invoice@2026.10.3"]
     assert record["ocr"] == {"engine": None, "text_method": "pdf_text", "page_confidence": None, "line_confidence": 1.0}
     assert record["split"] in {"train", "validation", "test"}
     assert REVIEWER not in result.path.read_text()

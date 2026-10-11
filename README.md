@@ -206,6 +206,13 @@ What the model is asked to do, and what it is not allowed to do:
 - Each document type has its own prompt template (`backend/vaultai/model/templates.py`). Each template names the type, the allowed keys, required and optional fields, value types, what each field is and is easily confused with, and the null rule. Legal templates allow facts and issue spotting only, keep the document's wording, and leave risk flags to the rules.
 - The model sees each line's id and exact text, with layout notes on separate lines: pages, tables and their columns, clauses, signature blocks, two-column blocks read one column at a time, and low OCR confidence. Page numbers and repeated headers and footers are left out.
 - Output is constrained with a per-task JSON Schema (`response_format: json_schema`). If the server refuses schemas, VaultAI uses `json_object` instead. A reply that is not JSON or not the schema gets one repair turn, two attempts in all. A reply is read up to 1 MB.
+- Obligation analysis is its own task. The prompt defines binding language (shall, must, agrees to, is responsible for, deadlines such as "no later than" or "within") and says what to leave out (permissions such as "may", descriptions, background). It lists the document's parties and defined terms, and asks for one entry per duty. Each obligation cites the line where its quote starts, and `end_line_id` lets a wrapped sentence continue onto one or two following lines. A relative deadline such as "within 30 days" goes in `deadline_text`; `due_date` is set only when a calendar date is printed there. VaultAI refuses an obligation when:
+  - its citation or quote is not exact;
+  - its sentence has no binding language;
+  - the sentence names a different party;
+  - its deadline is not printed.
+
+  Every refusal is recorded with a stable code.
 - Every value must name a line id the model was shown and quote that line exactly (spacing aside). Text values are stored as printed. Amounts, dates, and currencies are re-parsed from the quote. Values that fail are discarded and logged as `ungrounded_value`, and are never retried. Output that still does not match the schema is discarded whole as `model_output_rejected`.
 - Confidence comes from the evidence, not from the model:
   - label proximity, OCR quality, and agreement with the rules;
@@ -410,7 +417,8 @@ Each run prints, and with `--json` saves:
 - diagnostics as counts by stable code, never text:
   - `model_failure_reasons` counts every refused attempt by code (`empty_content`, `invalid_json`, `schema_invalid`, `response_too_large`);
   - `model_output_rejections_by_reason` counts the same codes for replies still unusable after the repair attempt;
-  - `grounding_rejections_by_reason` counts well-formed answers that the evidence check discarded, by code (`invalid_citation`, `unsupported_by_document`, `conflicting_evidence`, `weak_evidence`, `obligation_not_grounded`, `deadline_not_grounded`, `unknown_field`, `other`).
+  - `grounding_rejections_by_reason` counts well-formed answers that the evidence check discarded, by code (`invalid_citation`, `unsupported_by_document`, `conflicting_evidence`, `weak_evidence`, `obligation_not_grounded`, `deadline_not_grounded`, `party_not_grounded`, `not_an_obligation`, `unknown_field`, `other`);
+  - `model_obligations_accepted` and `model_obligations_correct` count model obligations kept, and how many match an expected obligation's kind, due date, and party.
 
   The same counts are stored per document in `doc_metrics`, summed in `GET /api/system/metrics`, and shown on the dashboard.
 

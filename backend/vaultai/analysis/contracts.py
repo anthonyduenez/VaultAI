@@ -483,6 +483,11 @@ def _resolve(party: str | None, names: Mapping[str, str]) -> str | None:
     return party
 
 
+def party_terms(doc: Doc, fields: Mapping[str, Found]) -> tuple[tuple[str, str], ...]:
+    """(term, full name) for each party the document names or defines, e.g. ("Client", "Harborview Logistics LLC")."""
+    return tuple(dict.fromkeys((term, name) for term, name in _party_names(sentences(doc), fields).items()))
+
+
 def _party_names(sents: list[Sentence], fields: Mapping[str, Found]) -> dict[str, str]:
     names: dict[str, str] = {}
     for name, term in preamble_parties(sents)[0]:

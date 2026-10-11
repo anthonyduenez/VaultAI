@@ -23,13 +23,13 @@ from dataclasses import dataclass
 from datetime import date
 
 from vaultai.analysis import ObligationRec
-from vaultai.domain import DocType, Evidence, FieldOrigin, IssueCode, ValueType
+from vaultai.domain import DocType, Evidence, FieldOrigin, IssueCode, ObligationKind, ValueType
 from vaultai.extraction import Found, evidence
 from vaultai.extraction.normalize import CURRENCY_CODES, find_dates, find_money, money_str
 from vaultai.model import confidence, output
 from vaultai.model.diagnostics import FailureReason, GroundingReason, failure_reason
 from vaultai.model.base import AnalyzeTask, ClassifyTask, ExtractTask, TranscribeTask
-from vaultai.parsing.layout import Doc
+from vaultai.parsing.layout import Doc, Line, page_of
 from vaultai.validation import Issue
 
 MODEL_CONFIDENCE_CAP = confidence.CAP
@@ -51,6 +51,15 @@ def canon(text: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", text).split())
 
 
+# Curly quotes and dashes compare equal to their plain forms; nothing else is relaxed.
+_TYPOGRAPHY = str.maketrans({"‘": "'", "’": "'", "‚": "'", "‛": "'", "′": "'", "“": '"', "”": '"', "„": '"',
+                             "″": '"', "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "―": "-", "−": "-"})
+
+
+def _matchable(text: str) -> str:
+    return canon(text).translate(_TYPOGRAPHY)
+
+
 def line_id(raw: str | None) -> str | None:
     """The bare citation handle, accepting the bracketed or annotated forms shown in the prompt ("[p1.l4 ocr 60%]")."""
     m = _LINE_ID.match(raw or "")
@@ -60,7 +69,7 @@ def line_id(raw: str | None) -> str | None:
 def quote_on_line(doc: Doc, allowed: set[str], cited: str | None, quote: str | None) -> bool:
     if not cited or not quote or not canon(quote) or cited not in allowed or cited not in doc.by_id:
         return False
-    return canon(quote) in canon(doc.by_id[cited].text)
+    return _matchable(quote) in _matchable(doc.by_id[cited].text)
 
 
 def printed(value: str, quote: str) -> str | None:
@@ -214,12 +223,128 @@ def _faithful(description: str, source: str) -> bool:
     return bool(words) and len(words & set(_CONTENT_WORD.findall(source.casefold()))) >= 0.6 * len(words)
 
 
+MAX_SPAN_LINES = 3
+
+
+def cited_span(doc: Doc, allowed: set[str], start: str | None, end: str | None) -> list[Line] | None:
+    """The cited lines from `start` to `end`: next to each other on one page, none quarantined, all shown to the model."""
+    if not _cited(doc, allowed, start):
+        return None
+    if end is None or end == start:
+        return [doc.by_id[start]]
+    if not _cited(doc, allowed, end) or page_of(start) != page_of(end):
+        return None
+    lines = doc.page(page_of(start)).lines
+    ids = [ln.id for ln in lines]
+    i, j = ids.index(start), ids.index(end)
+    span = list(lines[i:j + 1])
+    if not 0 < j - i < MAX_SPAN_LINES or any(ln.flag or ln.id not in allowed for ln in span):
+        return None
+    return span
+
+
+def quote_position(span: list[Line], quote: str | None) -> tuple[str, int, int] | None:
+    """(span text, start, end) where the quote is copied exactly: starting on the first line and, for a span, ending
+    on the last. Curly quotes and dashes match their plain forms; nothing else is relaxed."""
+    wanted = _matchable(quote or "")
+    if not wanted:
+        return None
+    texts = [_matchable(ln.text) for ln in span]
+    joined = " ".join(texts)
+    first_end, last_start = len(texts[0]), len(joined) - len(texts[-1])
+    pos = joined.find(wanted)
+    while pos != -1:
+        if pos < first_end and (len(span) == 1 or pos + len(wanted) > last_start):
+            return joined, pos, pos + len(wanted)
+        pos = joined.find(wanted, pos + 1)
+    return None
+
+
+_SENTENCE_END = re.compile(r"[.;!?](?=\s|$)")
+_ABBREVIATION = re.compile(r"\b(?:Inc|Co|Corp|Ltd|LLC|L\.L\.C|No|Nos|Mr|Mrs|Ms|Dr|St|Jr|Sr|vs|Sec|U\.S|e\.g|i\.e)\.$", re.I)
+
+
+def sentence_around(text: str, start: int, end: int) -> str:
+    """The sentence of `text` that holds text[start:end], ignoring periods that end common abbreviations."""
+    begin = 0
+    for m in _SENTENCE_END.finditer(text, 0, start):
+        if not _ABBREVIATION.search(text[:m.end()]):
+            begin = m.end()
+    stop = len(text)
+    for m in _SENTENCE_END.finditer(text, end):
+        if not _ABBREVIATION.search(text[:m.end()]):
+            stop = m.end()
+            break
+    return text[begin:stop].strip()
+
+
+def _span_evidence(span: list[Line]) -> Evidence:
+    if len(span) == 1:
+        return evidence(span[0])
+    boxes = [ln.bbox for ln in span if ln.bbox]
+    bbox = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)) \
+        if len(boxes) == len(span) else span[0].bbox
+    return Evidence(page=page_of(span[0].id), bbox=bbox, line_id=span[0].id, text=" ".join(ln.text for ln in span))
+
+
+_MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d"
+_NOT_DUTY_VERBS = r"(?:not\s+)?(?:receive|be|have|retain|own|remain|continue|survive|accrue|benefit|apply|include)\b"
+_DUTY = re.compile(
+    rf"\b(?:(?:shall|will)\s+(?!{_NOT_DUTY_VERBS})\w+|must|agrees?\s+to|agreed\s+to|undertakes?\s+to|"
+    r"(?:is|are)\s+(?:responsible|required|obligated|obliged)\b|required\s+to|(?:is|are)\s+to\s+\w+|needs?\s+to|"
+    r"no\s+later\s+than|on\s+or\s+before|(?:is|are)\s+due\b|please|may\s+not|cannot|can\s*not|upon\s+termination|"
+    r"within\s+(?:\w+\s+)?\(?\d|(?:by|before|prior\s+to)\s+(?:" + _MONTH + r"|\d{1,2}[/.-]\d))", re.I)
+_KIND_CUE = {
+    ObligationKind.RENEWAL: re.compile(r"\brenew|\bextend|\bextension\b|\bsuccessive\b", re.I),
+    ObligationKind.EXPIRATION: re.compile(r"\bexpir|\bends?\b|\buntil\b|\bthrough\b|\bterminat|\bterm\b", re.I),
+    ObligationKind.NOTICE: re.compile(r"\bnotice\b|\bnotif", re.I),
+    ObligationKind.SIGNATURE: re.compile(r"\bsign|\baccept|\bcountersign|\bexecut", re.I),
+    ObligationKind.PAYMENT: re.compile(r"\bpa(?:y|id)|\bpayable\b|\binvoice|\bfees?\b|\bdue\b", re.I),
+}
+_GENERIC_PARTIES = (("either party", "either party"), ("each party", "each party"), ("both parties", "both parties"),
+                    ("the parties", "the parties"))
+
+
+def is_duty(kind: ObligationKind, text: str, table: str | None) -> bool:
+    """Binding language for this kind of obligation. Permissions ("may"), descriptions, and background are not duties."""
+    if kind is ObligationKind.DELIVERABLE and table and "due" in table:
+        return True
+    if kind in (ObligationKind.RENEWAL, ObligationKind.EXPIRATION):
+        return bool(_KIND_CUE[kind].search(text))
+    if _DUTY.search(text):
+        return True
+    return kind in _KIND_CUE and bool(_KIND_CUE[kind].search(text))
+
+
+def _mentions(text: str, names: tuple[str, ...]) -> int:
+    """Where the last of `names` ends in `text`, or -1."""
+    ends = [m.end() for n in names if n for m in re.finditer(rf"(?<!\w){re.escape(n.casefold())}(?!\w)", text.casefold())]
+    return max(ends, default=-1)
+
+
+def party_check(party: str, quote: str, parties: tuple[tuple[str, str], ...], known_text: str) -> str:
+    """How the quote supports `party` as the one who must act.
+
+    "subject": the words before the binding verb name this party. "other": they name a different party.
+    "known": they name no party, but the document mentions this one. "unknown": the document never mentions it.
+    """
+    duty = _DUTY.search(quote)
+    subject = quote[:duty.start()] if duty else ""
+    position, entry = max(((_mentions(subject, e), e) for e in (*parties, *_GENERIC_PARTIES)), key=lambda m: m[0])
+    wanted = canon(party).casefold()
+    if position >= 0:
+        same = any(n and (wanted in n.casefold() or n.casefold() in wanted) for n in entry)
+        return "subject" if same else "other"
+    return "known" if wanted in known_text else "unknown"
+
+
 def ground_analyze(raw: object, task: AnalyzeTask, doc: Doc, date_order: str
                    ) -> tuple[list[Claim], list[ObligationRec], list[Issue]]:
     out = output.parse(task, raw)
     if out is None:
         return [], [], [rejected(failure_reason(raw))]
     allowed = {ln.id for ln in task.lines} | fact_line_ids(task)
+    tables = {ln.id: ln.table for ln in task.lines if ln.table}
     facts = " ".join(task.known_facts.values())
     known_text = canon(" ".join(ln.text for ln in task.lines) + " " + facts).casefold()
     issues: list[Issue] = []
@@ -233,29 +358,49 @@ def ground_analyze(raw: object, task: AnalyzeTask, doc: Doc, date_order: str
             continue
         claims.append(Claim(" ".join(c.text.split()), tuple(evidence(ln) for ln in cited)))
     obligations = []
+    seen: set[tuple] = set()
     for o in out.obligations:
-        cited = line_id(o.line_id)
-        if not _cited(doc, allowed, cited):
+        span = cited_span(doc, allowed, line_id(o.line_id), line_id(o.end_line_id) if o.end_line_id else None)
+        if span is None:
             issues.append(_ungrounded(GroundingReason.INVALID_CITATION, "obligation"))
             continue
-        if not quote_on_line(doc, allowed, cited, o.quote):
+        found = quote_position(span, o.quote)
+        if found is None:
             issues.append(_ungrounded(GroundingReason.OBLIGATION_NOT_GROUNDED, "obligation"))
             continue
-        line = doc.by_id[cited]
+        quote = canon(o.quote)
+        sentence = sentence_around(*found)
+        if not is_duty(o.kind, sentence, tables.get(span[0].id)):
+            issues.append(_ungrounded(GroundingReason.NOT_AN_OBLIGATION, "obligation"))
+            continue
+        party = " ".join(o.party.split()) if o.party else None
+        support = party_check(party, sentence, task.parties, known_text) if party else "unknown"
+        if support == "other":
+            issues.append(_ungrounded(GroundingReason.PARTY_NOT_GROUNDED, "responsible party"))
+            continue
+        if support == "unknown":
+            party = None
+        deadline = canon(o.deadline_text) if o.deadline_text and canon(o.deadline_text) else None
+        if deadline and _matchable(deadline) not in sentence:
+            issues.append(_ungrounded(GroundingReason.DEADLINE_NOT_GROUNDED, "deadline"))
+            continue
         due = None
         if o.due_date:
-            value = typed(ValueType.DATE, o.due_date, o.quote, (), date_order)
+            value = typed(ValueType.DATE, o.due_date, deadline or quote, (), date_order)
             if value is None:
                 issues.append(_ungrounded(GroundingReason.DEADLINE_NOT_GROUNDED, "deadline"))
                 continue
             due = date.fromisoformat(value[0])
         description = " ".join(o.description.split())
-        if not _faithful(description, line.text):
-            description = canon(o.quote)
-        party = " ".join(o.party.split()) if o.party else None
-        if party and canon(party).casefold() not in known_text:
-            party = None
-        obligations.append(ObligationRec(o.kind, party, description, due, evidence(line), FieldOrigin.MODEL))
+        if not _faithful(description, sentence) or not _supported(description, sentence, date_order):
+            description = quote
+        if deadline and _matchable(deadline) not in _matchable(description):
+            description = f"{description} ({deadline})"
+        key = (o.kind, span[0].id, _matchable(quote).casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        obligations.append(ObligationRec(o.kind, party, description, due, _span_evidence(span), FieldOrigin.MODEL))
     return claims, obligations, issues
 
 
