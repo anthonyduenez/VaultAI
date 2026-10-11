@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from vaultai.domain import DocType, ModelKind, ModelStatus
+from vaultai.model.diagnostics import FailureReason
 from vaultai.schemas import FieldSpec
 
 
@@ -72,12 +73,12 @@ Task = ClassifyTask | ExtractTask | AnalyzeTask | TranscribeTask
 class Reply:
     """What an adapter may return instead of bare output: the decoded JSON plus how it was obtained.
 
-    `failures` names why earlier attempts were refused ("not_json", "schema", "too_large"), never their text.
+    `failures` holds one stable code per refused attempt (vaultai.model.diagnostics.FailureReason), never its text.
     """
 
     output: object
     attempts: int = 1
-    failures: tuple[str, ...] = ()
+    failures: tuple[FailureReason, ...] = ()
     usage: dict[str, int] = field(default_factory=dict)
     prompt_chars: int = 0
 

@@ -42,10 +42,13 @@ PROCESS_CODES = frozenset({IssueCode.MODEL_UNAVAILABLE, IssueCode.MODEL_OUTPUT_R
 
 @dataclass(frozen=True)
 class Issue:
+    """`reason` is an optional stable diagnostic code (vaultai.model.diagnostics) for model rejections; never content."""
+
     code: IssueCode
     message: str
     field_key: str | None = None
     evidence: Evidence | None = None
+    reason: str | None = None
 
     @property
     def severity(self) -> Severity:

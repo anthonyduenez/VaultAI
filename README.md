@@ -223,7 +223,7 @@ Endpoint and failure rules:
 - Proxy environment variables are ignored (`trust_env=False`), redirects are not followed, and the in-process egress guard blocks any socket connect to a non-local address.
 - If the model is unreachable, times out (`VAULTAI_MODEL_TIMEOUT_S`), or answers with an error, the document keeps its rules-only results, gets a `model_unavailable` warning, and goes to `needs_review`. There is no fallback to a cloud API and no silent fallback to the mock backend.
 - Validated model answers are cached in the database. The key covers the document hash, the exact prompt, the prompt version, the model, and the model settings, so changing any of them asks again.
-- Per-document stage timings, model calls, retries, rejections, and token counts are stored in `doc_metrics` without any document text. Totals appear on the dashboard and at `GET /api/system/metrics`.
+- Per-document stage timings, model calls, retries, rejections, token counts, and rejection reasons are stored in `doc_metrics` without any document text. Reasons are stable codes with counts; the rejected reply, the prompt, and quoted lines are never stored or logged. Totals appear on the dashboard and at `GET /api/system/metrics`.
 - **Settings & Privacy** shows whether the endpoint is reachable and which model it serves.
 
 Every request carries a top-level `"chat_template_kwargs": {"enable_thinking": false}` (from `VAULTAI_MODEL_ENABLE_THINKING`, false by default). With vLLM's reasoning parser on, Nemotron 3.5 Lightning otherwise spends its tokens on a `reasoning` field and returns `content: null`. VaultAI reads only `message.content`. Reasoning text is never taken as an answer, and an empty reply counts as unusable: it gets the one repair attempt, then the document goes to review with `model_output_rejected`. If a model writes `<think>` blocks inside `content`, the reply parser strips them before it looks for the JSON object.
@@ -406,7 +406,13 @@ Each run prints, and with `--json` saves:
 - required-field and all-field accuracy, missing and incorrect fields;
 - model values kept and how many were right, grounded-value rate, rejected outputs;
 - model calls by task, prompt size, token counts;
-- processing time, OCR failures, and the review-status distribution.
+- processing time, OCR failures, and the review-status distribution;
+- diagnostics as counts by stable code, never text:
+  - `model_failure_reasons` counts every refused attempt by code (`empty_content`, `invalid_json`, `schema_invalid`, `response_too_large`);
+  - `model_output_rejections_by_reason` counts the same codes for replies still unusable after the repair attempt;
+  - `grounding_rejections_by_reason` counts well-formed answers that the evidence check discarded, by code (`invalid_citation`, `unsupported_by_document`, `conflicting_evidence`, `weak_evidence`, `obligation_not_grounded`, `deadline_not_grounded`, `unknown_field`, `other`).
+
+  The same counts are stored per document in `doc_metrics`, summed in `GET /api/system/metrics`, and shown on the dashboard.
 
 [docs/AI_TUNING_BASELINE.md](docs/AI_TUNING_BASELINE.md) has the numbers before the tuning work. [docs/AI_TUNING.md](docs/AI_TUNING.md) has the numbers after, the confidence policy, the remaining failure modes, and why the model weights were not fine-tuned.
 

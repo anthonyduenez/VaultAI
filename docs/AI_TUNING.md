@@ -113,6 +113,27 @@ After model values are merged with the rules, a model value is lowered to 0.50 w
 
 A required field below 0.75 raises `low_extraction_confidence` and sends the document to `needs_review`. Whatever the score, a document the model touched is `ready` or `needs_review`, never auto-approved.
 
+## Diagnosing rejections
+
+Every rejection is recorded as a stable code with a count, per document in `doc_metrics` and in total in `GET /api/system/metrics` and the evaluation JSON. The rejected reply, the prompt, values, and quoted lines are never stored or logged. Codes live in `backend/vaultai/model/diagnostics.py`.
+
+| Code | Counted in | Meaning | Usual fix |
+| --- | --- | --- | --- |
+| `empty_content` | `model_failure_reasons`, `model_output_rejections_by_reason` | `message.content` was null or blank. Reasoning fields are never read. | Check that `chat_template_kwargs.enable_thinking` is false and `VAULTAI_MODEL_MAX_TOKENS` is large enough |
+| `invalid_json` | same | The content was not a JSON object | Structured output support on the server |
+| `schema_invalid` | same | A JSON object that is not the requested structure, or a type outside the allowed list | Prompt or schema |
+| `response_too_large` | same | The reply exceeded 1 MB and was cut off. It is not retried. | Server limits |
+| `invalid_citation` | `grounding_rejections_by_reason` | Line id missing, malformed, not shown to the model, or not in the document | Prompt: cite shown ids only |
+| `unsupported_by_document` | same | The quote is not on the cited line, or the value does not read as its type inside the quote | Prompt: copy exactly; possibly tuning |
+| `conflicting_evidence` | same | Two different answers for one field | Prompt or context |
+| `weak_evidence` | same | Calibrated confidence below 0.40, usually poor OCR | OCR |
+| `obligation_not_grounded` | same | An obligation's quote is not on its cited line | Prompt: quote one line exactly |
+| `deadline_not_grounded` | same | An obligation's due date is not printed in its quote, often computed from "within N days" | Prompt: printed dates only |
+| `unknown_field` | same | A key that was not requested | Schema enforcement on the server |
+| `other` | same | A discarded value without a recognized code | Investigate |
+
+`model_failure_reasons` counts every refused attempt, including ones the repair turn recovered. `model_output_rejections_by_reason` counts only replies that stayed unusable. Its total equals `model_outputs_rejected`.
+
 ## Remaining failure modes
 
 - **Signatures on scans and photos.** Signature status is `unknown` and signer names are missed on OCR'd pages, because there are no vector marks to detect. That is 3 incorrect and 4 missing fields on the OCR variant with any backend. A text-only model cannot fix it, so VaultAI never asks one. A local vision model or a mark detector on page images could.

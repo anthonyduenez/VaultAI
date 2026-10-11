@@ -27,6 +27,7 @@ from vaultai.domain import DocType, Evidence, FieldOrigin, IssueCode, ValueType
 from vaultai.extraction import Found, evidence
 from vaultai.extraction.normalize import CURRENCY_CODES, find_dates, find_money, money_str
 from vaultai.model import confidence, output
+from vaultai.model.diagnostics import FailureReason, GroundingReason, failure_reason
 from vaultai.model.base import AnalyzeTask, ClassifyTask, ExtractTask, TranscribeTask
 from vaultai.parsing.layout import Doc
 from vaultai.validation import Issue
@@ -42,8 +43,8 @@ _ADVICE = re.compile(
 _CONTENT_WORD = re.compile(r"[a-z0-9][a-z0-9'-]{3,}")
 
 
-def _rejected() -> Issue:
-    return Issue(IssueCode.MODEL_OUTPUT_REJECTED, REJECTED)
+def rejected(reason: FailureReason | str) -> Issue:
+    return Issue(IssueCode.MODEL_OUTPUT_REJECTED, REJECTED, reason=str(reason))
 
 
 def canon(text: str) -> str:
@@ -71,22 +72,28 @@ def printed(value: str, quote: str) -> str | None:
     return m.group() if m else None
 
 
-def _ungrounded(label: str, key: str | None = None, why: str = "is not supported by the document text") -> Issue:
-    return Issue(IssueCode.UNGROUNDED_VALUE, f"The model proposed a {label} that {why}; it was discarded.", key)
+def _ungrounded(reason: GroundingReason, label: str, key: str | None = None,
+                why: str = "is not supported by the document text") -> Issue:
+    return Issue(IssueCode.UNGROUNDED_VALUE, f"The model proposed a {label} that {why}; it was discarded.", key,
+                 reason=reason.value)
+
+
+def _cited(doc: Doc, allowed: set[str], cited: str | None) -> bool:
+    return bool(cited) and cited in allowed and cited in doc.by_id
 
 
 def ground_classify(raw: object, task: ClassifyTask) -> tuple[DocType | None, float, list[Issue]]:
     out = output.parse(task, raw)
     if out is None:
-        return None, 0.0, [_rejected()]
+        return None, 0.0, [rejected(failure_reason(raw))]
     if out.doc_type is None:
         return None, 0.0, []
     try:
         doc_type = DocType(out.doc_type.strip().lower())
     except ValueError:
-        return None, 0.0, [_rejected()]
+        return None, 0.0, [rejected(FailureReason.SCHEMA_INVALID)]
     if doc_type not in task.labels:
-        return None, 0.0, [_rejected()]
+        return None, 0.0, [rejected(FailureReason.SCHEMA_INVALID)]
     return doc_type, min(out.confidence, MODEL_CONFIDENCE_CAP), []
 
 
@@ -137,7 +144,7 @@ def ground_extract(raw: object, task: ExtractTask, doc: Doc, existing: Mapping[s
                    model_name: str) -> tuple[list[Found], list[Issue]]:
     out = output.parse(task, raw)
     if out is None:
-        return [], [_rejected()]
+        return [], [rejected(failure_reason(raw))]
     specs = {f.key: f for f in task.fields}
     allowed = {ln.id for ln in task.lines}
     issues: list[Issue] = []
@@ -147,25 +154,32 @@ def ground_extract(raw: object, task: ExtractTask, doc: Doc, existing: Mapping[s
             continue
         spec = specs.get(f.key)
         cited = line_id(f.line_id)
-        if spec is None or not quote_on_line(doc, allowed, cited, f.quote):
-            issues.append(_ungrounded("value", f.key if spec else None))
+        if spec is None:
+            issues.append(_ungrounded(GroundingReason.UNKNOWN_FIELD, "value"))
+            continue
+        if not _cited(doc, allowed, cited):
+            issues.append(_ungrounded(GroundingReason.INVALID_CITATION, "value", spec.key))
+            continue
+        if not quote_on_line(doc, allowed, cited, f.quote):
+            issues.append(_ungrounded(GroundingReason.UNSUPPORTED_BY_DOCUMENT, "value", spec.key))
             continue
         value = typed(spec.value_type, f.value, f.quote or "", spec.options, date_order)
         if value is None:
-            issues.append(_ungrounded(spec.label.lower(), spec.key))
+            issues.append(_ungrounded(GroundingReason.UNSUPPORTED_BY_DOCUMENT, spec.label.lower(), spec.key))
             continue
         candidates.setdefault(spec.key, []).append((f, cited, value))
     kept: list[Found] = []
     for key, found in candidates.items():
         spec = specs[key]
         if len({v[0] for _, _, v in found}) > 1:
-            issues.append(_ungrounded(spec.label.lower(), key, "had more than one conflicting answer"))
+            issues.append(_ungrounded(GroundingReason.CONFLICTING_EVIDENCE, spec.label.lower(), key,
+                                      "had more than one conflicting answer"))
             continue
         f, cited, (value, raw_text, currency) = found[0]
         line = doc.by_id[cited]
         score, _ = confidence.calibrate(spec, value, f.quote or "", line, doc, existing.get(key), f.confidence)
         if score < confidence.REJECT_BELOW:
-            issues.append(_ungrounded(spec.label.lower(), key, "rests on weak evidence"))
+            issues.append(_ungrounded(GroundingReason.WEAK_EVIDENCE, spec.label.lower(), key, "rests on weak evidence"))
             continue
         current = existing.get(key)
         if current is not None and current.value is not None and current.confidence >= score:
@@ -204,7 +218,7 @@ def ground_analyze(raw: object, task: AnalyzeTask, doc: Doc, date_order: str
                    ) -> tuple[list[Claim], list[ObligationRec], list[Issue]]:
     out = output.parse(task, raw)
     if out is None:
-        return [], [], [_rejected()]
+        return [], [], [rejected(failure_reason(raw))]
     allowed = {ln.id for ln in task.lines} | fact_line_ids(task)
     facts = " ".join(task.known_facts.values())
     known_text = canon(" ".join(ln.text for ln in task.lines) + " " + facts).casefold()
@@ -221,15 +235,18 @@ def ground_analyze(raw: object, task: AnalyzeTask, doc: Doc, date_order: str
     obligations = []
     for o in out.obligations:
         cited = line_id(o.line_id)
+        if not _cited(doc, allowed, cited):
+            issues.append(_ungrounded(GroundingReason.INVALID_CITATION, "obligation"))
+            continue
         if not quote_on_line(doc, allowed, cited, o.quote):
-            issues.append(_ungrounded("obligation"))
+            issues.append(_ungrounded(GroundingReason.OBLIGATION_NOT_GROUNDED, "obligation"))
             continue
         line = doc.by_id[cited]
         due = None
         if o.due_date:
             value = typed(ValueType.DATE, o.due_date, o.quote, (), date_order)
             if value is None:
-                issues.append(_ungrounded("deadline"))
+                issues.append(_ungrounded(GroundingReason.DEADLINE_NOT_GROUNDED, "deadline"))
                 continue
             due = date.fromisoformat(value[0])
         description = " ".join(o.description.split())
@@ -245,5 +262,5 @@ def ground_analyze(raw: object, task: AnalyzeTask, doc: Doc, date_order: str
 def ground_transcribe(raw: object) -> tuple[list[str], list[Issue]]:
     out = output.parse(TranscribeTask(b""), raw)
     if out is None:
-        return [], [_rejected()]
+        return [], [rejected(failure_reason(raw))]
     return [" ".join(t.split()) for t in out.lines if t.strip()], []

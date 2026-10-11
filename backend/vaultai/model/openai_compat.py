@@ -32,6 +32,7 @@ from vaultai.domain import ModelKind, ModelStatus
 from vaultai.logging_utils import get_logger
 from vaultai.model import output, prompts
 from vaultai.model.base import ModelUnavailable, Reply, Task, TranscribeTask
+from vaultai.model.diagnostics import FailureReason, failure_reason
 
 STATUS_TTL_S = 10.0
 STATUS_TIMEOUT_S = 2.0
@@ -164,6 +165,11 @@ class OpenAICompatModel:
             log.warning("local model server refused json_schema output; using json_object model=%s", self.name)
             return self._post(self._payload(task, messages))
 
+    def _log_failure(self, task: Task, attempt: int, reason: FailureReason) -> None:
+        """The stable code only; the reply itself is never logged."""
+        log.info("model reply rejected model=%s task=%s attempt=%d reason=%s", self.name, type(task).__name__, attempt,
+                 reason.value)
+
     def run(self, task: Task) -> Reply:
         self._ensure_local()
         if isinstance(task, TranscribeTask) and not self.vision:
@@ -171,27 +177,31 @@ class OpenAICompatModel:
         base = prompts.messages(task, self.settings.model_system_prefix)
         chars = sum(len(m["content"]) for m in base if isinstance(m["content"], str))
         messages = base
-        failures: list[str] = []
+        failures: list[FailureReason] = []
         usage: dict[str, int] = {}
         raw: object = None
         for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
                 content, used = self._send(task, messages)
             except _TooLarge:
-                failures.append("too_large")
+                failures.append(FailureReason.RESPONSE_TOO_LARGE)
+                log.warning("model reply rejected model=%s task=%s attempt=%d reason=%s",
+                            self.name, type(task).__name__, attempt, FailureReason.RESPONSE_TOO_LARGE.value)
                 return Reply(None, attempt, tuple(failures), usage, chars)
             for k, v in used.items():
                 usage[k] = usage.get(k, 0) + v
             if content is None or (isinstance(content, str) and not content.strip()):
                 raw = None
-                failures.append("empty")
+                failures.append(FailureReason.EMPTY_CONTENT)
+                self._log_failure(task, attempt, failures[-1])
                 messages = prompts.repair(base, "", "it was empty")
                 continue
             raw = prompts.parse_reply(content) if isinstance(content, str) else content
             parsed, problem = output.check(task, raw)
             if parsed is not None:
                 return Reply(raw, attempt, tuple(failures), usage, chars)
-            failures.append("not_json" if not isinstance(raw, dict) else "schema")
+            failures.append(failure_reason(raw))
+            self._log_failure(task, attempt, failures[-1])
             previous = content if isinstance(content, str) else json.dumps(content, default=str)
             messages = prompts.repair(base, previous, problem or "it was not usable")
         return Reply(raw, MAX_ATTEMPTS, tuple(failures), usage, chars)

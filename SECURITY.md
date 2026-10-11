@@ -62,7 +62,7 @@ All state is under `VAULTAI_DATA_DIR` (default `data/`, ignored by git). The pro
 
 | Path | Contents |
 | --- | --- |
-| `data/vaultai.db` | SQLite. Documents, fields, line items, issues, clauses, obligations, summaries, per-document processing metrics (timings, model call counts, tokens, prompt versions; no document text), intake rows, capture sessions, exports, the OCR and model cache, the full-text index, and the audit log. |
+| `data/vaultai.db` | SQLite. Documents, fields, line items, issues, clauses, obligations, summaries, per-document processing metrics (timings, model call counts, tokens, prompt versions, and rejection reasons as stable codes with counts; no document text, prompt, or model reply), intake rows, capture sessions, exports, the OCR and model cache, the full-text index, and the audit log. |
 | `data/raw/` | original uploads under random names |
 | `data/derived/<doc_id>/` | rendered page PNGs |
 | `data/captures/<session>/` | scanner pages while a session is open |

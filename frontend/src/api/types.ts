@@ -473,6 +473,9 @@ export interface Metrics {
   model_prompt_tokens: number;
   model_completion_tokens: number;
   avg_model_call_ms: number | null;
+  model_failure_reasons: Record<string, number>;
+  model_rejections_by_reason: Record<string, number>;
+  grounding_rejections_by_reason: Record<string, number>;
   load_avg: number[] | null;
   rss_mb: number | null;
   gpu: GpuStatus | null;

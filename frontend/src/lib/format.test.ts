@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatDate, formatMoney, formatPercent, relativeDue } from "./format";
+import { formatBytes, formatDate, formatMoney, formatPercent, formatReasonCounts, relativeDue } from "./format";
 
 describe("formatMoney", () => {
   it("formats decimal strings with their currency", () => {
@@ -58,5 +58,15 @@ describe("formatBytes and formatPercent", () => {
     expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB");
     expect(formatPercent(0.934)).toBe("93%");
     expect(formatPercent(null)).toBe("—");
+  });
+});
+
+describe("formatReasonCounts", () => {
+  it("lists only non-zero codes, most frequent first", () => {
+    expect(formatReasonCounts({ empty_content: 1, invalid_json: 0, schema_invalid: 3 })).toBe("schema invalid 3 · empty content 1");
+  });
+  it("shows a dash when nothing was refused or the field is absent", () => {
+    expect(formatReasonCounts({ empty_content: 0 })).toBe("—");
+    expect(formatReasonCounts(undefined)).toBe("—");
   });
 });

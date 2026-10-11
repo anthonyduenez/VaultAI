@@ -12,6 +12,7 @@ import time
 
 from vaultai.context import AppContext
 from vaultai.domain import AuditAction, DocStatus, DocTiming, GpuStatus, Metrics, Route, Severity
+from vaultai.model import diagnostics
 from vaultai.pipeline.cache import HITS, MISSES
 
 GPU_TTL_S = 5.0
@@ -110,6 +111,9 @@ def compute_metrics(ctx: AppContext) -> Metrics:
         model_prompt_tokens=counters.get("model_prompt_tokens", 0),
         model_completion_tokens=counters.get("model_completion_tokens", 0),
         avg_model_call_ms=round(counters["model_ms"] / counters["model_calls"], 1) if counters.get("model_calls") else None,
+        model_failure_reasons=diagnostics.from_counters(counters, "failure_reasons"),
+        model_rejections_by_reason=diagnostics.from_counters(counters, "rejections_by_reason"),
+        grounding_rejections_by_reason=diagnostics.from_counters(counters, "grounding_rejections_by_reason"),
         load_avg=[round(v, 2) for v in os.getloadavg()] if hasattr(os, "getloadavg") else None,
         rss_mb=_rss_mb(),
         gpu=gpu_status(),

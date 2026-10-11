@@ -13,6 +13,12 @@ Usage: backend/.venv/bin/python scripts/eval_samples.py [--verbose] [--backend m
   --variant ocr            every page rasterized, so tesseract reads it
   --variant stress         field labels renamed so the rules miss required fields (held-out model check)
 
+Diagnostics in the output are counts by stable code, never text: model_failure_reasons (every refused attempt:
+empty_content, invalid_json, schema_invalid, response_too_large), model_output_rejections_by_reason (replies still
+unusable after the repair attempt), and grounding_rejections_by_reason (well-formed answers the evidence check
+discarded: invalid_citation, unsupported_by_document, conflicting_evidence, weak_evidence, obligation_not_grounded,
+deadline_not_grounded, unknown_field, other).
+
 Exit status is non-zero when a gate fails. Gates apply only to the default run (mock backend, text variant):
 they are the bar the rules must clear on the demo set and are not tuned to the current score. Other runs
 report metrics and expected statuses but do not gate, because a missing field correctly changes the status.
@@ -38,6 +44,7 @@ from vaultai.config import REPO_ROOT, load_settings  # noqa: E402
 from vaultai.devtools.evaluation import STRESS_LABELS, OracleModel, Recorder, rasterize_pdf, relabel_pdf  # noqa: E402
 from vaultai.domain import ModelKind, Severity, Source, ValueType  # noqa: E402
 from vaultai.intake.ingest import ingest_bytes  # noqa: E402
+from vaultai.model import diagnostics  # noqa: E402
 from vaultai.model.factory import build_model  # noqa: E402
 from vaultai.model.mock import MockModel  # noqa: E402
 from vaultai.pipeline.process import process_document, request_processing  # noqa: E402
@@ -144,6 +151,7 @@ def main() -> int:
         required = [0, 0]
         counts = Counter()
         statuses: Counter[str] = Counter()
+        reasons: dict[str, dict[str, int]] = {key: {} for key in diagnostics.MODEL_MAPS}
         rows = []
         with ctx.db() as conn:
             for rel, doc_id in docs.items():
@@ -166,6 +174,10 @@ def main() -> int:
                     counts[code] += all_issues.count(code)
                 counts["model_obligations"] += conn.execute(
                     "SELECT COUNT(*) FROM obligations WHERE doc_id = ? AND origin = 'model'", (doc_id,)).fetchone()[0]
+                stored = conn.execute("SELECT metrics_json FROM doc_metrics WHERE doc_id = ?", (doc_id,)).fetchone()
+                model_metrics = diagnostics.normalize(json.loads(stored[0]) if stored else None)["model"]
+                for key, kind in diagnostics.MODEL_MAPS.items():
+                    diagnostics.merge(reasons[key], model_metrics[key], kind)
 
                 type_ok = d["doc_type"] == want["doc_type"]
                 score["doc_type"][0] += type_ok
@@ -285,6 +297,9 @@ def main() -> int:
         "ungrounded_values_rejected": counts["ungrounded_value"],
         "grounded_value_rate": round(accepted / proposed, 4) if proposed else None,
         "model_outputs_rejected": counts["model_output_rejected"],
+        "model_output_rejections_by_reason": reasons["rejections_by_reason"],
+        "model_failure_reasons": reasons["failure_reasons"],
+        "grounding_rejections_by_reason": reasons["grounding_rejections_by_reason"],
         "model_unavailable": counts["model_unavailable"],
         "model_calls": len(calls),
         "model_calls_per_document": round(len(calls) / n_docs, 2),

@@ -143,3 +143,12 @@ export function shortHash(sha256: string): string {
 export function shortModelName(name: string): string {
   return name.split("/").pop() || name;
 }
+
+/** Non-zero diagnostic codes, most frequent first: "schema invalid 2 · empty content 1". Codes and counts only. */
+export function formatReasonCounts(counts: Record<string, number> | undefined): string {
+  const parts = Object.entries(counts ?? {})
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([code, n]) => `${code.replace(/_/g, " ")} ${formatCount(n)}`);
+  return parts.length ? parts.join(" · ") : "—";
+}

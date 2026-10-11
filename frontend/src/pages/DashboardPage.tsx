@@ -11,7 +11,7 @@ import { DueText } from "../components/ObligationList";
 import { PageHeader } from "../components/PageHeader";
 import { EmptyState, Loaded } from "../components/States";
 import { MODEL_KIND, OBLIGATION_KIND, STATUS, type Tone } from "../lib/display";
-import { formatCount, formatMoney, formatMs, formatPercent, isoDay, shortModelName } from "../lib/format";
+import { formatCount, formatMoney, formatMs, formatPercent, formatReasonCounts, isoDay, shortModelName } from "../lib/format";
 
 interface StatSpec {
   label: string;
@@ -230,6 +230,8 @@ function MetricsPanel({ metrics: m }: { metrics: Metrics }) {
       label: "Model retries / rejected",
       value: m.model_calls === 0 ? "—" : `${formatCount(m.model_retries)} / ${formatCount(m.model_outputs_rejected)}`,
     },
+    { label: "Model replies refused, by reason", value: formatReasonCounts(m.model_failure_reasons) },
+    { label: "Model values discarded, by reason", value: formatReasonCounts(m.grounding_rejections_by_reason) },
     {
       label: "Model tokens (in / out)",
       value:

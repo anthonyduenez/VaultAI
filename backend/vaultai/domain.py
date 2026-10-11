@@ -704,6 +704,9 @@ class Metrics(ApiModel):
     model_prompt_tokens: int = 0
     model_completion_tokens: int = 0
     avg_model_call_ms: float | None = None
+    model_failure_reasons: dict[str, int] = Field(default_factory=dict)
+    model_rejections_by_reason: dict[str, int] = Field(default_factory=dict)
+    grounding_rejections_by_reason: dict[str, int] = Field(default_factory=dict)
     load_avg: list[float] | None = None
     rss_mb: float | None = None
     gpu: GpuStatus | None = None

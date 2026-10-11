@@ -72,7 +72,7 @@ def test_output_is_constrained_by_a_json_schema_for_the_task(settings):
 def test_malformed_output_gets_exactly_one_repair_attempt(settings):
     server = Server("Sure! The vendor is Zephyr.", GOOD)
     reply = _model(settings, server).run(TASK)
-    assert (reply.output["fields"][0]["value"], reply.attempts, reply.failures) == ("Zephyr Tools LLC", 2, ("not_json",))
+    assert (reply.output["fields"][0]["value"], reply.attempts, reply.failures) == ("Zephyr Tools LLC", 2, ("invalid_json",))
     repair = server.requests[1]["messages"]
     assert [m["role"] for m in repair] == ["system", "user", "assistant", "user"]
     assert repair[2]["content"] == "Sure! The vendor is Zephyr." and "was not a JSON object" in repair[3]["content"]
@@ -81,7 +81,7 @@ def test_malformed_output_gets_exactly_one_repair_attempt(settings):
 def test_two_bad_replies_stop_after_the_second_attempt(settings):
     server = Server('{"fields": [], "status": "approved"}')
     reply = _model(settings, server).run(TASK)
-    assert (len(server.requests), reply.attempts, reply.failures) == (2, 2, ("schema", "schema"))
+    assert (len(server.requests), reply.attempts, reply.failures) == (2, 2, ("schema_invalid", "schema_invalid"))
     assert "extra_forbidden" in server.requests[1]["messages"][-1]["content"]
 
 
@@ -120,7 +120,7 @@ def test_an_oversized_reply_is_cut_off_and_rejected_without_a_retry(settings, mo
     monkeypatch.setattr(openai_compat, "MAX_RESPONSE_BYTES", 10_000)
     server = Server(_reply("x" * 50_000))
     reply = _model(settings, server).run(TASK)
-    assert (reply.output, reply.failures, len(server.requests)) == (None, ("too_large",), 1)
+    assert (reply.output, reply.failures, len(server.requests)) == (None, ("response_too_large",), 1)
 
 
 def test_token_usage_is_summed_over_attempts(settings):
@@ -237,7 +237,7 @@ def test_reasoning_is_never_taken_as_the_answer(settings, caplog, content):
                                        "quote": "Payable to Zephyr Tools LLC", "confidence": 0.9}]})
     server = Server(_vllm(content, reasoning=grounded, finish="length"))
     reply = _model(settings, server).run(TASK)
-    assert (reply.output, reply.failures, len(server.requests)) == (None, ("empty", "empty"), 2)
+    assert (reply.output, reply.failures, len(server.requests)) == (None, ("empty_content", "empty_content"), 2)
     retry = server.requests[1]["messages"]
     assert [m["role"] for m in retry] == ["system", "user"] and "Your previous reply was empty" in retry[1]["content"]
 

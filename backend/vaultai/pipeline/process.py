@@ -54,7 +54,8 @@ from vaultai.domain import (
 from vaultai.extraction import Found, Item, evidence
 from vaultai.extraction.rules import currency_field, extract_fields, kv_label
 from vaultai.logging_utils import get_logger
-from vaultai.model import confidence, context, grounding, output, prompts
+from vaultai.model import confidence, context, diagnostics, grounding, output, prompts
+from vaultai.model.diagnostics import FailureReason, GroundingReason
 from vaultai.model.base import AnalyzeTask, ClassifyTask, DocLine, ExtractTask, ModelUnavailable, Reply, Task, TranscribeTask
 from vaultai.model.templates import ANALYZED_TYPES
 from vaultai.parsing import isolate, ocr
@@ -130,11 +131,25 @@ class Run:
                 "calls": {k.removeprefix("calls:"): v for k, v in sorted(stats.items()) if k.startswith("calls:")},
                 **{k: stats[k] for k in ("attempts", "retries", "rejected", "cache_hits", "prompt_chars",
                                          "prompt_tokens", "completion_tokens", "ms", "unavailable")},
+                **self.diagnostics(),
                 "prompt_versions": sorted(self.prompt_versions),
                 "config": cache.model_config(ctx.settings),
             },
             "route": self.route.value,
             "ocr_engine": self.ocr_engine,
+        }
+
+
+    def diagnostics(self) -> dict[str, dict[str, int]]:
+        """Counts by stable code (vaultai.model.diagnostics): refused attempts, rejected replies, discarded values."""
+        issues = list(self.issues)
+        return {
+            "failure_reasons": {r.value: self.model_stats[f"failure:{r.value}"] for r in FailureReason},
+            "rejections_by_reason": diagnostics.counts(
+                (i.reason for i in issues if i.code is IssueCode.MODEL_OUTPUT_REJECTED), FailureReason),
+            "grounding_rejections_by_reason": diagnostics.counts(
+                (i.reason for i in issues if i.code is IssueCode.UNGROUNDED_VALUE), GroundingReason,
+                fallback=GroundingReason.OTHER.value),
         }
 
 
@@ -191,6 +206,7 @@ class _Model:
             return None
         reply = out if isinstance(out, Reply) else Reply(out)
         valid = output.parse(task, reply.output) is not None
+        failures = reply.failures or ((diagnostics.failure_reason(reply.output),) if not valid else ())
         self._note(**{f"calls:{kind}": 1}, attempts=reply.attempts, retries=reply.attempts - 1, rejected=int(not valid),
                    prompt_chars=reply.prompt_chars, ms=int((time.monotonic() - started) * 1000),
                    prompt_tokens=reply.usage.get("prompt_tokens", 0),
@@ -198,9 +214,10 @@ class _Model:
         if key is not None and valid:
             with self.ctx.db() as conn:
                 cache.put(conn, key, reply.output)
-        if reply.output is None:
-            with self.run.lock:
-                self.run.issues.append(Issue(IssueCode.MODEL_OUTPUT_REJECTED, grounding.REJECTED))
+        with self.run.lock:
+            self.run.model_stats.update(f"failure:{code}" for code in failures)
+            if reply.output is None:
+                self.run.issues.append(grounding.rejected(failures[-1] if failures else FailureReason.EMPTY_CONTENT))
         return reply.output
 
 
@@ -502,6 +519,10 @@ def _write_records(ctx: AppContext, conn: sqlite3.Connection, doc_id: str, run: 
     for name in ("attempts", "retries", "rejected", "prompt_tokens", "completion_tokens", "unavailable"):
         if stats[name]:
             db.bump(conn, f"model_{name}", stats[name])
+    for prefix, tally in zip(diagnostics.COUNTER_PREFIXES.values(), run.diagnostics().values()):
+        for code, n in tally.items():
+            if n:
+                db.bump(conn, f"{prefix}{code}", n)
     calls = sum(v for k, v in stats.items() if k.startswith("calls:"))
     if calls:
         db.bump(conn, "model_calls", calls)
@@ -688,9 +709,10 @@ def process_document(ctx: AppContext, doc_id: str) -> None:
             _write_records(ctx, conn, doc_id, run)
             final = _finish(ctx, conn, doc_id, run, ms)
         calls = sum(v for k, v in run.model_stats.items() if k.startswith("calls:"))
-        log.info("processed doc=%s pages=%d ms=%d status=%s route=%s model_calls=%d model_ms=%d retries=%d stages=%s",
-                 doc_id, run.page_count, ms, final.value, run.route.value, calls, run.model_stats["ms"],
-                 run.model_stats["retries"], ",".join(f"{k}:{v}" for k, v in run.stages_ms.items()))
+        reasons = ",".join(f"{code}:{n}" for tally in run.diagnostics().values() for code, n in tally.items() if n)
+        log.info("processed doc=%s pages=%d ms=%d status=%s route=%s model_calls=%d model_ms=%d retries=%d stages=%s "
+                 "reasons=%s", doc_id, run.page_count, ms, final.value, run.route.value, calls, run.model_stats["ms"],
+                 run.model_stats["retries"], ",".join(f"{k}:{v}" for k, v in run.stages_ms.items()), reasons or "none")
     except Exception as exc:
         log.warning("processing failed doc=%s error=%s", doc_id, type(exc).__name__)
         _fail(ctx, doc_id, exc)
