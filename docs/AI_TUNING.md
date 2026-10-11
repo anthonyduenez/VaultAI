@@ -202,4 +202,4 @@ backend/.venv/bin/python scripts/eval_samples.py --backend openai_compat --varia
 backend/.venv/bin/python scripts/eval_samples.py --backend openai_compat --variant ocr    --json nemotron-ocr.json
 ```
 
-For a true before-and-after on Nemotron, run the GX10 commands at `f7bd04d` (baseline pipeline with the harness) and at the tip of the branch. `model_values_accepted` minus `model_values_correct` is the number of accepted but wrong model values.
+Run them at the tip of the branch. A run at an earlier commit, such as `f7bd04d`, is not a usable Nemotron baseline on a server that returns reasoning by default: those commits send no `chat_template_kwargs`, so every reply comes back with empty `content` and is rejected. Compare the GX10 numbers with the mock and oracle baselines above instead. `model_values_accepted` minus `model_values_correct` is the number of accepted but wrong model values.
