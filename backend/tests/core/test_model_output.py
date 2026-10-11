@@ -10,6 +10,7 @@ import pytest
 
 from conftest import make_ctx
 from core.conftest import doc, field, invoice_pdf, issue_codes, run
+from vaultai.config import Settings
 from vaultai.domain import DocType, ModelKind
 from vaultai.metrics import compute_metrics
 from vaultai.model import openai_compat
@@ -38,8 +39,10 @@ class Server:
     def __init__(self, *replies) -> None:
         self.replies = list(replies)
         self.requests: list[dict] = []
+        self.raw: list[bytes] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.raw.append(request.content)
         self.requests.append(json.loads(request.content))
         reply = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
         if isinstance(reply, Exception):
@@ -176,3 +179,70 @@ def test_classification_prompt_names_the_rules_candidates(settings):
     task = ClassifyTask((DocLine("p1.l1", "Notes"),), tuple(DocType), (DocType.CORRESPONDENCE, DocType.OTHER))
     _model(settings, server).run(task)
     assert "closest candidates were: correspondence, other" in server.requests[0]["messages"][1]["content"]
+
+
+def _vllm(content: str | None, *, reasoning: str | None = None, finish: str = "stop") -> httpx.Response:
+    """A reply shaped like vLLM's, including its reasoning fields."""
+    return httpx.Response(200, json={
+        "id": "chatcmpl-1", "object": "chat.completion", "model": "nemotron",
+        "choices": [{"index": 0, "finish_reason": finish, "message": {
+            "role": "assistant", "content": content, "reasoning": reasoning, "reasoning_content": reasoning, "tool_calls": []}}],
+        "usage": {"prompt_tokens": 300, "completion_tokens": 20, "total_tokens": 320},
+    })
+
+
+def test_every_request_disables_thinking_at_the_top_level(settings):
+    refused = httpx.Response(400, json={"error": {"message": "response_format json_schema is not supported"}})
+    server = Server(refused, "not json", GOOD)
+    reply = _model(settings, server).run(TASK)
+    assert reply.attempts == 2
+    assert [r.get("response_format", {}).get("type") for r in server.requests] == ["json_schema", "json_object", "json_object"]
+    for body, raw in zip(server.requests, server.raw):
+        assert body["chat_template_kwargs"] == {"enable_thinking": False}
+        assert "extra_body" not in body and b"extra_body" not in raw
+        assert body["model"] == "nemotron"
+
+
+def test_enable_thinking_follows_the_setting(settings):
+    server = Server(GOOD)
+    _model(settings, server, model_enable_thinking=True).run(TASK)
+    assert server.requests[0]["chat_template_kwargs"] == {"enable_thinking": True}
+
+
+def test_the_demo_default_is_thinking_disabled(settings):
+    from vaultai.config import load_settings
+    from vaultai.config import REPO_ROOT, read_env_file
+
+    assert Settings().model_enable_thinking is False
+    example = read_env_file(REPO_ROOT / ".env.example")
+    assert example["VAULTAI_MODEL_ENABLE_THINKING"] == "false"
+    assert load_settings({**example, "VAULTAI_DATA_DIR": str(settings.data_dir)}).model_enable_thinking is False
+
+
+def test_a_valid_json_content_reply_is_accepted(settings):
+    good = json.dumps({"fields": [{"key": "vendor", "value": "Zephyr Tools LLC", "line_id": "p1.l11",
+                                   "quote": "Payable to Zephyr Tools LLC", "confidence": 0.9}]})
+    server = Server(_vllm(good))
+    ctx = make_ctx(_settings(settings), _model(settings, server))
+    doc_id = run(ctx, "invoice.pdf", _vendorless())
+    vendor = field(ctx, doc_id, "vendor")
+    assert (vendor["ai_value"], vendor["ai_origin"], vendor["line_id"]) == ("Zephyr Tools LLC", "model", "p1.l11")
+    assert issue_codes(ctx, doc_id) == set() and len(server.requests) == 1
+    assert (doc(ctx, doc_id)["status"], doc(ctx, doc_id)["route"], doc(ctx, doc_id)["approved_at"]) == ("ready", "model", None)
+
+
+@pytest.mark.parametrize("content", [None, "", "   \n"])
+def test_reasoning_is_never_taken_as_the_answer(settings, caplog, content):
+    grounded = json.dumps({"fields": [{"key": "vendor", "value": "Zephyr Tools LLC", "line_id": "p1.l11",
+                                       "quote": "Payable to Zephyr Tools LLC", "confidence": 0.9}]})
+    server = Server(_vllm(content, reasoning=grounded, finish="length"))
+    reply = _model(settings, server).run(TASK)
+    assert (reply.output, reply.failures, len(server.requests)) == (None, ("empty", "empty"), 2)
+    retry = server.requests[1]["messages"]
+    assert [m["role"] for m in retry] == ["system", "user"] and "Your previous reply was empty" in retry[1]["content"]
+
+    ctx = make_ctx(_settings(settings), _model(settings, Server(_vllm(content, reasoning=grounded))))
+    doc_id = run(ctx, "invoice.pdf", _vendorless())
+    assert (field(ctx, doc_id, "vendor")["ai_value"], doc(ctx, doc_id)["status"]) == (None, "needs_review")
+    assert issue_codes(ctx, doc_id) == {"model_output_rejected", "missing_required"}
+    assert "model reply had no content" in caplog.text and "Zephyr" not in caplog.text

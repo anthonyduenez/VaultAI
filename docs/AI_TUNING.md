@@ -11,6 +11,12 @@ This page records what changed in VaultAI's document-understanding pipeline, wha
 
 Whether Nemotron's accuracy changed is unknown until the commands under [Reproduce](#reproduce) are run on the GX10. The bundled samples are also small (16 documents, all fictional, one layout family per type), so every percentage below rests on very few cases.
 
+### Update: reasoning output on the GX10
+
+On the GX10, Nemotron 3.5 Lightning served by vLLM answered every VaultAI request with `content: null` and its text in a `reasoning` field, so every reply was rejected as unusable. VaultAI now sends a top-level `"chat_template_kwargs": {"enable_thinking": false}` on every request (`VAULTAI_MODEL_ENABLE_THINKING`, false by default), which makes the model answer in `content`. VaultAI still reads only `content`: reasoning is never taken as an answer, and an empty reply is retried once and then rejected.
+
+This was checked on the development Mac against a fake loopback server that withholds `content` unless thinking is disabled. It was not checked against Nemotron. Before the change, all 33 model calls across the text, stress, and OCR runs were rejected after two attempts. After it, none were. The GX10 evaluations below still need to be run.
+
 ## Results
 
 The baseline was taken at commit `f7bd04d`, the final run at the tip of `vaultai-mvp`. Both used the same 16 documents and the same scorer.

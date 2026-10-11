@@ -115,7 +115,7 @@ Stated plainly so nobody has to discover them:
 8. Prompt-injection screening is pattern based. It catches the demo set and common phrasings and will miss others. The grounding gate and human review are the second and third lines.
 9. Signature detection relies on drawn marks in PDFs. A scanned or photographed signature reports `unknown`, so a missing signature on a scan is not flagged.
 10. Python dependencies are pinned by version range and the frontend by a lockfile. Neither is pinned by hash, and there is no software bill of materials.
-11. The `openai_compat` adapter was tested against scripted and fake local servers, not a real Nemotron deployment. JSON Schema output, the `json_object` step-down, prompt formatting, and `/no_think` handling may need adjustment for a specific server. `docs/AI_TUNING.md` lists what was and was not measured.
+11. The `openai_compat` adapter was tested against scripted and fake local servers, not a real Nemotron deployment. JSON Schema output, the `json_object` step-down, prompt formatting, and the `chat_template_kwargs.enable_thinking` switch may need adjustment for a specific server. Reasoning fields in a reply are never read; only `message.content` is. `docs/AI_TUNING.md` lists what was and was not measured.
 
 ## Reporting a problem
 

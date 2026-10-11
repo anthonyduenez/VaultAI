@@ -53,6 +53,7 @@ class Settings:
     model_json_mode: bool = True
     model_response_format: str = "json_schema"
     model_system_prefix: str = ""
+    model_enable_thinking: bool = False
     model_concurrency: int = 2
     model_extract_context_chars: int = 2400
     model_analysis_context_chars: int = 12000

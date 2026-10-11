@@ -191,6 +191,7 @@ VAULTAI_MODEL_TEMPERATURE=0
 VAULTAI_MODEL_JSON_MODE=true      # false sends no response_format at all
 VAULTAI_MODEL_RESPONSE_FORMAT=json_schema   # json_schema | json_object | none
 VAULTAI_MODEL_VISION=false        # Nemotron 3.5 Lightning is text-only; local OCR handles page images
+VAULTAI_MODEL_ENABLE_THINKING=false  # sent as chat_template_kwargs.enable_thinking on every request
 VAULTAI_MODEL_SYSTEM_PREFIX=      # see below
 VAULTAI_MODEL_CONCURRENCY=2       # model requests in flight at once, across all documents
 VAULTAI_MODEL_EXTRACT_CONTEXT_CHARS=2400    # document text per field-extraction request
@@ -225,7 +226,9 @@ Endpoint and failure rules:
 - Per-document stage timings, model calls, retries, rejections, and token counts are stored in `doc_metrics` without any document text. Totals appear on the dashboard and at `GET /api/system/metrics`.
 - **Settings & Privacy** shows whether the endpoint is reachable and which model it serves.
 
-`VAULTAI_MODEL_SYSTEM_PREFIX` is prepended as the first line of the system prompt on every request. Nemotron reasoning models accept `/no_think` there to skip the reasoning block, which saves tokens and time on short JSON tasks. If a model emits `<think>` blocks anyway, the reply parser strips them before it looks for the JSON object.
+Every request carries a top-level `"chat_template_kwargs": {"enable_thinking": false}` (from `VAULTAI_MODEL_ENABLE_THINKING`, false by default). With vLLM's reasoning parser on, Nemotron 3.5 Lightning otherwise spends its tokens on a `reasoning` field and returns `content: null`. VaultAI reads only `message.content`. Reasoning text is never taken as an answer, and an empty reply counts as unusable: it gets the one repair attempt, then the document goes to review with `model_output_rejected`. If a model writes `<think>` blocks inside `content`, the reply parser strips them before it looks for the JSON object.
+
+`VAULTAI_MODEL_SYSTEM_PREFIX` is prepended as the first line of the system prompt on every request. Some reasoning models accept `/no_think` there. Nemotron does not need it once thinking is off in the chat template.
 
 `VAULTAI_MODEL_VISION=true` enables one more use. When a page has no text layer and no OCR engine is available, the page image is sent to the model for transcription. A document read this way takes the vision route, so it can never auto-approve. When tesseract is installed, OCR is used and the vision path is not.
 

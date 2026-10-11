@@ -249,3 +249,4 @@ def test_the_demo_profile_keeps_the_local_nemotron_model_and_no_phone_pairing():
     assert value["VAULTAI_MODEL_ENDPOINT"] == "http://127.0.0.1:8000/v1"
     assert value["VAULTAI_MODEL_NAME"] == "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
     assert value["VAULTAI_PHONE_ENABLED"] == "false" and value["VAULTAI_EGRESS_GUARD"] == "true"
+    assert value["VAULTAI_MODEL_ENABLE_THINKING"] == "false"

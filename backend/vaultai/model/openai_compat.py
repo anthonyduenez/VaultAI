@@ -7,9 +7,14 @@ ModelUnavailable; there is no fallback to any other model.
 
 Output is constrained as tightly as the server allows: a JSON Schema per task
 (response_format json_schema), or JSON object mode when the server refuses
-schemas. A reply that is not JSON or does not fit the schema gets one repair
-attempt (two attempts in all); nothing else is retried. Replies are read with a
-size cap, and no reply text is ever logged.
+schemas. Every request carries a top-level chat_template_kwargs with
+enable_thinking set from VAULTAI_MODEL_ENABLE_THINKING (false by default), so a
+reasoning model such as Nemotron puts its answer in message.content instead of
+a reasoning field. Only message.content is ever read: reasoning text is never
+taken as an answer, and a reply with empty content counts as unusable. A reply
+that is empty, not JSON, or does not fit the schema gets one repair attempt
+(two attempts in all); nothing else is retried. Replies are read with a size
+cap, and no reply text is ever logged.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ CONNECT_TIMEOUT_S = 5.0
 MAX_ATTEMPTS = 2
 MAX_RESPONSE_BYTES = 1_000_000
 _SCHEMA_REFUSAL = re.compile(rb"json_schema|response_format|guided|structured|grammar", re.I)
+_FINISH = re.compile(r"[a-z_]{1,24}")
 
 log = get_logger("vaultai.model")
 
@@ -106,6 +112,7 @@ class OpenAICompatModel:
             "messages": messages,
             "temperature": self.settings.model_temperature,
             "max_tokens": self.settings.model_max_tokens,
+            "chat_template_kwargs": {"enable_thinking": self.settings.model_enable_thinking},
         }
         if self._format == "json_schema":
             name = f"vaultai_{type(task).__name__.removesuffix('Task').lower()}"
@@ -116,7 +123,7 @@ class OpenAICompatModel:
         return payload
 
     def _post(self, payload: dict) -> tuple[object, dict]:
-        """(message content, usage). Reads at most MAX_RESPONSE_BYTES of the reply."""
+        """(message content, usage). Reads at most MAX_RESPONSE_BYTES of the reply, and only message.content of it."""
         with self._slots:
             try:
                 with self._client.stream("POST", f"{self.endpoint}/chat/completions", json=payload,
@@ -136,9 +143,14 @@ class OpenAICompatModel:
             raise ModelUnavailable(f"model server answered HTTP {status}")
         try:
             data = json.loads(body)
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            content = choice["message"]["content"]
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             raise ModelUnavailable("model server returned an unexpected response shape") from exc
+        if content is None or (isinstance(content, str) and not content.strip()):
+            finish = choice.get("finish_reason") if isinstance(choice, dict) else None
+            log.warning("model reply had no content; reasoning is never used as an answer model=%s finish=%s",
+                        self.name, finish if isinstance(finish, str) and _FINISH.fullmatch(finish) else "other")
         usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
         return content, {k: int(v) for k, v in usage.items() if k in ("prompt_tokens", "completion_tokens")
                          and isinstance(v, int) and v >= 0}
@@ -170,6 +182,11 @@ class OpenAICompatModel:
                 return Reply(None, attempt, tuple(failures), usage, chars)
             for k, v in used.items():
                 usage[k] = usage.get(k, 0) + v
+            if content is None or (isinstance(content, str) and not content.strip()):
+                raw = None
+                failures.append("empty")
+                messages = prompts.repair(base, "", "it was empty")
+                continue
             raw = prompts.parse_reply(content) if isinstance(content, str) else content
             parsed, problem = output.check(task, raw)
             if parsed is not None:

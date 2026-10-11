@@ -190,12 +190,19 @@ REPAIR_ECHO_CHARS = 2000
 
 
 def repair(messages_: list[dict], previous: str, problem: str) -> list[dict]:
-    """One follow-up turn after an unusable reply. It asks for the same JSON again and never asks for new evidence."""
+    """One follow-up after an unusable reply. It asks for the same JSON again and never asks for new evidence.
+
+    An empty reply is not echoed back as an empty assistant turn; the note is added to the request instead.
+    """
+    note = (f"That reply could not be used because {problem}. Reply again with only the JSON object in the requested "
+            "structure. Use null for anything not printed in the document.")
+    if not previous.strip():
+        *head, last = messages_
+        return [*head, {**last, "content": f"{last['content']}\n\nYour previous reply was empty. {note}"}]
     return [
         *messages_,
         {"role": "assistant", "content": previous[:REPAIR_ECHO_CHARS]},
-        {"role": "user", "content": f"That reply could not be used because {problem}. Reply again with only the JSON "
-                                    "object in the requested structure. Use null for anything not printed in the document."},
+        {"role": "user", "content": note},
     ]
 
 
