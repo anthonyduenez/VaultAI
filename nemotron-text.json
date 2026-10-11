@@ -1,0 +1,42 @@
+{
+  "backend": "openai_compat",
+  "variant": "text",
+  "model": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4",
+  "documents": 16,
+  "doc_type_accuracy": 1.0,
+  "required_field_accuracy": 1.0,
+  "field_accuracy": 1.0,
+  "missing_fields": 0,
+  "incorrect_fields": 0,
+  "model_values_accepted": 0,
+  "model_values_correct": 0,
+  "model_obligations_accepted": 0,
+  "ungrounded_values_rejected": 0,
+  "grounded_value_rate": null,
+  "model_outputs_rejected": 5,
+  "model_unavailable": 0,
+  "model_calls": 5,
+  "model_calls_per_document": 0.31,
+  "model_calls_by_task": {
+    "AnalyzeTask": 5
+  },
+  "model_attempts": 10,
+  "prompt_chars_mean": 4726,
+  "prompt_chars_max": 8637,
+  "prompt_chars_mean_by_task": {
+    "AnalyzeTask": 4726
+  },
+  "tokens_reported": 23682,
+  "model_ms_total": 82427,
+  "avg_processing_ms": 5290,
+  "wall_s": 84.75,
+  "docs_failed": 0,
+  "pages_without_text": 0,
+  "status_distribution": {
+    "approved": 2,
+    "needs_review": 7,
+    "ready": 7
+  },
+  "status_matches_expected": 13,
+  "issue_sets_match_expected": 11
+}
