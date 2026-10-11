@@ -91,7 +91,7 @@ def json_schema(task: Task) -> dict:
                         "confidence": {"type": "number"}})
     if isinstance(task, ExtractTask):
         item = _object({
-            "key": {"type": "string", "enum": [f.key for f in task.fields]},
+            "key": {"type": "string", **({"enum": [f.key for f in task.fields]} if task.fields else {})},
             "value": _nullable({"type": "string"}),
             "line_id": _nullable({"type": "string"}),
             "quote": _nullable({"type": "string"}),
