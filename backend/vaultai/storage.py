@@ -15,7 +15,7 @@ from pathlib import Path
 
 from vaultai.config import Settings
 
-ALLOWED_EXTENSIONS = frozenset({"pdf", "png", "jpg", "tiff", "heic", "txt", "xlsx", "csv"})
+ALLOWED_EXTENSIONS = frozenset({"pdf", "png", "jpg", "tiff", "heic", "txt", "xlsx", "csv", "jsonl"})
 
 
 class UnsafePath(ValueError):
