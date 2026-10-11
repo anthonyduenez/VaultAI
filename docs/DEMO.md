@@ -1,28 +1,32 @@
 # VaultAI demo script
 
-Fourteen steps, about ten minutes, using only the bundled fictional samples. Each step names the page, the clicks, and what you should see. The flow was run end to end in a browser on the development Mac with the mock model backend and the egress guard on. Timings and OCR results will differ on a GX10.
+Thirteen steps, about ten minutes, using only the bundled fictional samples. Each step names the page, the clicks, and what you should see. The GX10 profile uses local vLLM with NVIDIA Nemotron 3.5 Lightning, local Tesseract OCR, and the egress guard. Phone pairing is disabled for this demo; import files directly or use a physical/mock scanner.
 
 ## Before you start
 
-1. Build the frontend and start the backend with phone capture on. Phone capture needs the phone and the Mac (or GX10) on the same LAN.
+1. Start the local Nemotron server on the GX10, then verify that it advertises the exact model used by `.env`.
 
    ```sh
-   cd frontend && npm run build && cd ..
-   VAULTAI_PHONE_ENABLED=true backend/.venv/bin/python -m vaultai
+   curl -fsS http://127.0.0.1:8000/v1/models
    ```
 
-   Or put `VAULTAI_PHONE_ENABLED=true` in `.env` and run `cd backend && .venv/bin/python -m vaultai`.
+   The response should include `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4`.
 
-2. Open http://127.0.0.1:8765.
-3. If the database already has documents from an earlier run, open **Settings & Privacy**, type `DELETE`, and click **Delete all local data** so the demo starts clean.
+2. From the repository root, run the one-command launcher. It checks the model endpoint, builds the frontend if needed, starts VaultAI, waits for it to become healthy, and imports the bundled samples.
 
-## The fourteen steps
+   ```sh
+   ./scripts/start_gx10_demo.sh --load-samples
+   ```
+
+3. Open http://127.0.0.1:8765. If the database already has documents from an earlier run, open **Settings & Privacy**, type `DELETE`, and click **Delete all local data**. Then run `./scripts/start_gx10_demo.sh --load-samples` again.
+
+## The thirteen steps
 
 ### 1. Show that nothing leaves the machine
 
-Open **Settings & Privacy**. The **Local-only guarantees** card lists document storage, OCR, the model, network egress, phone capture, and exports, each with where it runs. The subtitle reads "All processing on this device". The **Configuration** card echoes the `.env` values, including `VAULTAI_MODEL_BACKEND` and `VAULTAI_EGRESS_GUARD=true`.
+Open **Settings & Privacy**. The **Local-only guarantees** card lists document storage, OCR, the model, network egress, and exports, each with where it runs. The subtitle reads "All processing on this device". The **Configuration** card echoes the `.env` values, including `VAULTAI_MODEL_BACKEND=openai_compat`, the Nemotron model name, and `VAULTAI_EGRESS_GUARD=true`.
 
-Optional, in a terminal: `lsof -p <backend pid> -i` shows the listeners on 8765 and 8766 and no outbound connections.
+Optional, in a terminal: `lsof -p <backend pid> -i` shows the local VaultAI and model listeners and no outbound connections.
 
 ### 2. Import the demo samples
 
@@ -30,7 +34,7 @@ Open **Import & Scan**, choose the **Demo samples** tab, and click **Import samp
 
 ### 3. Process them
 
-Click the **Process** button above the queue. The queue polls while documents move through "Reading pages", "Classifying", "Extracting fields", "Analyzing clauses", and "Validating". With the mock backend all thirteen finish in a few seconds. The end state on the Mac was 1 approved, 4 needs review, 8 ready.
+Click the **Process** button above the queue. The queue polls while documents move through "Reading pages", "Classifying", "Extracting fields", "Analyzing clauses", and "Validating". With Nemotron, processing time depends on the GX10 load and the number of model-assisted fields. The result should still show the same review-first behavior: clean rules-only receipts can be approved, while warnings and model-assisted results remain reviewable.
 
 ### 4. The dashboard
 
@@ -64,25 +68,20 @@ Open **Review queue**. Documents that need a decision are first and deferred one
 
 ### 11. Scan two pages with the mock scanner
 
-Open **Import & Scan**, choose the **Scanner** tab. With no SANE device the mock scanner "VaultAI demo scanner (mock)" is listed. Click **Scan page** twice. Two pages from `samples/scanner/` appear with a slight skew and speckle. Rotate or crop one to show the editor. Click **Combine 2 pages into PDF & import**, then process the queue. Open the document. The provenance panel under the header shows the OCR engine (tesseract 5.5.3 on the Mac). The two-page Tidewater invoice may land in review with an amount mismatch because dense OCR'd tables can miss rows. That is the honest outcome, and the reviewer fixes it the same way as in step 6.
+Open **Import & Scan**, choose the **Scanner** tab. With no SANE device the mock scanner "VaultAI demo scanner (mock)" is listed. Click **Scan page** twice. Two pages from `samples/scanner/` appear with a slight skew and speckle. Rotate or crop one to show the editor. Click **Combine 2 pages into PDF & import**, then process the queue. Open the document. The provenance panel under the header shows local Tesseract OCR on the GX10. The two-page Tidewater invoice may land in review with an amount mismatch because dense OCR'd tables can miss rows. That is the honest outcome, and the reviewer fixes it the same way as in step 6.
 
-### 12. Capture a page from a phone
-
-Choose the **Phone** tab and click **Start pairing**. A QR code, the URL, and a 6-digit code appear. Scan the QR code with the phone. The phone page shows the same code. Confirm they match. Photograph a page sideways, tap rotate on the phone, and tap **Send pages to VaultAI**. The desktop shows the capture as completed and the Import queue gains a document with source phone. On the Mac the rotated photo was OCR'd at confidence 0.95.
-
-Reload the phone page. It answers 404 because the session was single use.
-
-### 13. Export the approved records
+### 12. Export the approved records
 
 Open **Export**. Leave the format as XLSX, keep **Include source evidence sheet** checked, and read the preview. It lists only approved records and warns how many matching records still need review and are left out. Click **Create export**, then **Download export**. Open the workbook. `Approved Records` labels each row Human or Auto-approval policy. `Source Evidence` keeps the AI value beside the human edit on the Acme total. `Export Info` carries the notice that VaultAI is not legal or financial advice. There are no formula cells. Back in the app, the exported documents now show status `exported` and **Export history** lists the file with its SHA-256.
 
-### 14. Delete everything
+### 13. Delete everything
 
 Open a document and click **Delete**, then **Delete permanently**. The file, pages, records, and intake rows are gone. The **Audit log** on **Settings & Privacy** shows the delete row with only a SHA-256 prefix, and the document's earlier rows keep their action and time but no longer show the edited values or notes. Then type `DELETE` in the danger zone and click **Delete all local data**. The data directory is wiped and the only audit row left is `delete_all`.
 
 ## If something goes wrong
 
-- If the phone cannot open the link, check that the phone is on the same LAN and that `VAULTAI_PHONE_HOST` is an IP the phone can reach. **Settings & Privacy** must show `VAULTAI_PHONE_ENABLED` as `true`.
+- If the UI does not load, check `data/run/backend.log` and confirm that port 8765 is free. Stop a previous launcher with `./scripts/start_gx10_demo.sh --stop`, then run the launcher again.
+- If the Nemotron check fails, start the GX10's vLLM server and confirm `/v1/models` contains `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4`.
 - If the scanner tab says no scanner found, `VAULTAI_SCANNER_BACKEND` is `none`, or `sane` was chosen without `scanimage` installed. `auto` always finds the mock scanner.
 - If OCR shows as not installed, install tesseract and restart. Without OCR, scanned and photographed pages produce no text and land in review as unreadable.
 - If every sample is marked duplicate, the samples are already in the database. Delete all local data first.

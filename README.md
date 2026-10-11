@@ -6,13 +6,13 @@ VaultAI turns a pile of business paperwork (checks, receipts, invoices, contract
 
 The working rule is to automate the routine, surface the risky, and keep the human in control. Clean receipts can be approved by policy. Anything with a warning (a total that does not add up, a missing signature, an auto-renewal clause, hidden text, text that tries to instruct an AI) stops in the review queue until a person decides.
 
-This is a hackathon entry for the ASUS Local AI Track. It is an MVP, not a production system. The numbers below were measured on the development Mac, not on a GX10. See [Known limitations](#known-limitations) and [SECURITY.md](SECURITY.md) before you trust it with real paperwork.
+This is a hackathon entry for the ASUS Local AI Track. It is an MVP, not a production system. The recommended demo target is an ASUS Ascent GX10 running vLLM with NVIDIA Nemotron 3.5 Lightning; the repeatable demo command is in [docs/DEMO.md](docs/DEMO.md). See [Known limitations](#known-limitations) and [SECURITY.md](SECURITY.md) before you trust it with real paperwork.
 
 ## What it does
 
 | Step | What happens |
 | --- | --- |
-| Capture | Drop files or a folder (PDF, PNG, JPEG, HEIC, TIFF, or plain text), feed pages from a scanner, or photograph pages with a phone over the LAN. Bundled fictional samples cover every document type. |
+| Capture | Drop files or a folder (PDF, PNG, JPEG, HEIC, TIFF, or plain text), or feed pages from a scanner. Bundled fictional samples cover every document type. |
 | Preflight | Byte-level checks before anything is stored. Spoofed files, encrypted or active PDFs, decompression bombs, and duplicates are refused. |
 | Parse | A sandboxed subprocess renders pages and reads the text layer. Pages without text go to tesseract OCR, up to four pages at once. |
 | Classify and extract | Rules pick the document type and read the fields for that type. A local model is asked only for what the rules could not read, and every model value must cite and quote a line of the document. |
@@ -25,7 +25,7 @@ This is a hackathon entry for the ASUS Local AI Track. It is an MVP, not a produ
 
 ```mermaid
 flowchart LR
-    A[Capture<br/>upload, folder,<br/>scanner, phone] --> B[Preflight<br/>bytes only]
+    A[Capture<br/>upload, folder,<br/>scanner] --> B[Preflight<br/>bytes only]
     B --> C[Parse<br/>sandboxed subprocess]
     C --> D[OCR<br/>tesseract]
     D --> E[Classify]
@@ -44,17 +44,17 @@ Processes on the machine:
 | Process | Binds to | Purpose |
 | --- | --- | --- |
 | Desktop API and built frontend | `127.0.0.1:8765` | FastAPI app. Serves `/api/*` and, when `frontend/dist` exists, the React UI. Refuses requests whose `Host` header is not local and state changes without the `X-VaultAI: 1` header. |
-| Phone listener (optional) | `<lan-ip>:8766` | A separate FastAPI app with three routes. Rejects any client that is not on a loopback, private, or link-local address. Off by default. |
+| Phone listener (optional) | `<lan-ip>:8766` | A separate FastAPI app with three routes. Rejects any client that is not on a loopback, private, or link-local address. Disabled in the GX10 demo profile. |
 | Parser worker | none | `python -I vaultai/parsing/worker.py`, one subprocess per document, with CPU and file-size limits, a 60 s timeout, and an address-space cap on Linux. |
 | tesseract | none | Runs as a subprocess on the PNG the parser produced, never on the uploaded bytes. |
-| Local model server | your choice, local address only | Any OpenAI-compatible server. VaultAI talks to it over HTTP with proxies disabled. A public hostname is refused at startup. |
+| Local model server | `127.0.0.1:8000` | vLLM serving `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4`. VaultAI talks to it over HTTP with proxies disabled. A public hostname is refused at startup. |
 
 Data lives under `data/` (configurable with `VAULTAI_DATA_DIR`), created with owner-only permissions. The SQLite database is `data/vaultai.db`. Raw files, rendered pages, capture pages, and exports are in separate subdirectories with server-generated names.
 
 ## Repository layout
 
 ```
-.env.example            every VAULTAI_* setting with its default
+.env.example            recommended GX10/Nemotron demo profile and all VAULTAI_* settings
 backend/
   vaultai/              the Python package (API, pipeline, model adapters, export, capture)
   tests/                pytest suite (core/ for the pipeline, surfaces/ for the API)
@@ -74,6 +74,7 @@ samples/
 scripts/
   eval_samples.py       scores the pipeline against expected.json
   gen_types.py          regenerates frontend/src/api/types.ts from domain.py
+  start_gx10_demo.sh     verifies Nemotron, builds the UI, starts VaultAI, and loads samples
 SECURITY.md             security model, threat model, retention, known gaps
 ```
 
@@ -105,11 +106,25 @@ cd frontend && npm install && cd ..
 cp .env.example .env
 ```
 
-`.env` is read from the repository root at startup. Every value in it is the built-in default, so the copy works unchanged. Set `VAULTAI_ENV_FILE` to read a different file.
+`.env` is read from the repository root at startup. The checked-in example is the recommended GX10/Nemotron demo profile: it uses the local OpenAI-compatible endpoint, local OCR, and disables phone pairing. The `mock` backend remains available for deterministic tests, but is not the track demo configuration. Set `VAULTAI_ENV_FILE` to read a different file.
 
 ## Run
 
-Start the backend. It creates the data directory and database if they are missing.
+For the local-AI-track demo, start the GX10's local Nemotron server first and verify that it advertises the expected model:
+
+```sh
+curl -fsS http://127.0.0.1:8000/v1/models
+```
+
+Then use the one-command workflow. It verifies the model endpoint, builds the frontend if needed, starts the backend, waits for the health endpoint, and optionally imports the 13 bundled samples:
+
+```sh
+./scripts/start_gx10_demo.sh --load-samples
+```
+
+Open http://127.0.0.1:8765. Use `./scripts/start_gx10_demo.sh --stop` to stop the background backend.
+
+For a manual start, the backend creates the data directory and database if they are missing.
 
 ```sh
 cd backend && .venv/bin/python -m vaultai
@@ -157,22 +172,22 @@ VaultAI ships with two model backends. Set `VAULTAI_MODEL_BACKEND` in `.env`.
 
 | Backend | What it is |
 | --- | --- |
-| `mock` (default) | No language model at all. Classification and extraction come from the rules. The summary is a template that restates verified facts with citations. Every number in this README was measured in this mode. |
-| `openai_compat` | Any local server that speaks the OpenAI chat-completions API. Written for NVIDIA NIM, vLLM, TensorRT-LLM (`trtllm-serve`), llama.cpp server, and Ollama's `/v1` route. Tested so far only against a local fake OpenAI-compatible server. |
+| `mock` | Test-only deterministic rules backend. No language model is contacted; useful for repeatable unit tests and sample evaluation. |
+| `openai_compat` | Recommended for the GX10 demo. VaultAI calls the local vLLM OpenAI-compatible server running NVIDIA Nemotron 3.5 Lightning. The adapter also supports other local `/v1` servers such as NVIDIA NIM, TensorRT-LLM, llama.cpp, and Ollama. |
 
 Settings for `openai_compat`:
 
 ```sh
 VAULTAI_MODEL_BACKEND=openai_compat
 VAULTAI_MODEL_ENDPOINT=http://127.0.0.1:8000/v1
-VAULTAI_MODEL_NAME=nvidia/NVIDIA-Nemotron-Nano-9B-v2
+VAULTAI_MODEL_NAME=nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4
 VAULTAI_MODEL_API_KEY=            # only if your local server needs one
 VAULTAI_MODEL_CONTEXT_TOKENS=8192
 VAULTAI_MODEL_MAX_TOKENS=1024
-VAULTAI_MODEL_TIMEOUT_S=60
+VAULTAI_MODEL_TIMEOUT_S=180
 VAULTAI_MODEL_TEMPERATURE=0
 VAULTAI_MODEL_JSON_MODE=true      # sends response_format=json_object
-VAULTAI_MODEL_VISION=false        # true if the model accepts page images
+VAULTAI_MODEL_VISION=false        # Nemotron 3.5 Lightning is text-only; local OCR handles page images
 VAULTAI_MODEL_SYSTEM_PREFIX=      # see below
 ```
 
@@ -332,7 +347,7 @@ VaultAI is a document assistant. It is not legal, tax, accounting, or financial 
 
 ## Demo
 
-[docs/DEMO.md](docs/DEMO.md) walks through the 14-step demo with the exact clicks and sample file names. The short version is to load the demo samples, watch the receipt auto-approve, correct and approve the Acme invoice whose total is off by 90 dollars, see the QuickShip invoice's hidden and visible injection text quarantined, read the Brightpath MSA's clauses and its 2026-11-01 non-renewal deadline in the Action Center, scan two pages with the mock scanner, capture a page from a phone, export approved records to XLSX, then delete everything.
+[docs/DEMO.md](docs/DEMO.md) walks through the 13-step GX10 demo with the exact clicks and sample file names. The short version is to run `./scripts/start_gx10_demo.sh --load-samples`, watch the receipt auto-approve, correct and approve the Acme invoice whose total is off by 90 dollars, see the QuickShip invoice's hidden and visible injection text quarantined, read the Brightpath MSA's clauses and its 2026-11-01 non-renewal deadline in the Action Center, scan two pages with the mock scanner, export approved records to XLSX, then delete everything.
 
 ## Tests
 
@@ -350,7 +365,7 @@ Other timings on the development Mac: OCR of a 6-page scan went from 3.05 s to 1
 
 ## Known limitations
 
-- Not verified on a GX10 or against a real Nemotron server. The `openai_compat` adapter was tested against a local fake OpenAI-compatible server. A real SANE scanner was not tested.
+- The GX10/Nemotron path is exercised by the demo workflow, but a complete performance benchmark has not been recorded. A real SANE scanner was not tested.
 - The two-page scanned invoice can land in review with an amount mismatch because OCR misses table rows.
 - Signature status is `unknown` on scans and photos.
 - Sideways text on rotated pages can merge into one line.

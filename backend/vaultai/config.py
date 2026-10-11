@@ -43,7 +43,7 @@ class Settings:
 
     model_backend: ModelKind = ModelKind.MOCK
     model_endpoint: str = "http://127.0.0.1:8000/v1"
-    model_name: str = "nemotron"
+    model_name: str = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
     model_api_key: str | None = None
     model_context_tokens: int = 8192
     model_max_tokens: int = 1024
