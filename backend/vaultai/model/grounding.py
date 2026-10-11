@@ -5,7 +5,10 @@ Output must parse into a closed schema (vaultai.model.output; extra keys such as
 the model was shown, quote that line exactly (Unicode-normalized, whitespace
 collapsed, case kept), and read as its declared type inside the quote: amounts
 and dates are re-parsed from the printed text, and text values are stored as
-printed, never as the model spelled them. Values are then scored by
+printed, never as the model spelled them. Summary claims must cite a line,
+state only amounts and dates printed in what they cite, and give no advice;
+other claims are dropped (they change no record, so they raise no issue).
+Values are then scored by
 vaultai.model.confidence rather than trusted at the model's word, and never
 replace a more confident rules value. There is no code path from model output
 to a status change, an approval, or a file operation.
@@ -213,7 +216,6 @@ def ground_analyze(raw: object, task: AnalyzeTask, doc: Doc, date_order: str
             continue
         sources = " ".join(ln.text for ln in cited) + " " + facts
         if _ADVICE.search(c.text) or not _supported(c.text, sources, date_order):
-            issues.append(_ungrounded("summary statement"))
             continue
         claims.append(Claim(" ".join(c.text.split()), tuple(evidence(ln) for ln in cited)))
     obligations = []

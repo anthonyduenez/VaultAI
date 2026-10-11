@@ -168,7 +168,7 @@ def test_claims_with_advice_or_unsupported_numbers_are_dropped():
         {"text": "The fee is USD 12,500.00.", "line_ids": ["p1.l1"]}], "obligations": []}
     claims, _, issues = _analyze(raw, {"Recurring fee [p1.l1]": "USD 12,500.00"})
     assert [c.text for c in claims] == ["The report is due November 20, 2026.", "The fee is USD 12,500.00."]
-    assert len(issues) == 2
+    assert issues == []
 
 
 def _counting(settings: Settings, answer=empty_answers) -> tuple[object, ScriptedModel]:
