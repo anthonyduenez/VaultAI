@@ -41,7 +41,8 @@ class JobQueue:
 
     async def stop(self) -> None:
         for w in self._workers:
-            w.cancel()
+            if not w.cancelling():
+                w.cancel()
         await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers = []
         self._loop = None
@@ -75,8 +76,13 @@ class JobQueue:
             doc_id = await self._queue.get()
             with self._lock:
                 self._pending.discard(doc_id)
+            job = asyncio.create_task(asyncio.to_thread(process_document, self.ctx, doc_id))
             try:
-                await asyncio.to_thread(process_document, self.ctx, doc_id)
+                await asyncio.shield(job)
+            except asyncio.CancelledError:
+                # Cancelling the worker cannot stop a thread that is writing document data.
+                await asyncio.gather(job, return_exceptions=True)
+                raise
             except Exception as exc:
                 log.warning("worker error doc=%s error=%s", doc_id, type(exc).__name__)
             finally:

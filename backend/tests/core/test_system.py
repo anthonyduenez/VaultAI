@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from core.conftest import FakeOcr, ctx_with, ingest, invoice_pdf, png_bytes, receipt_pdf, run
@@ -67,6 +68,36 @@ def test_queue_processes_new_work_and_recovers_documents_left_processing(mock_ct
         statuses = [r["status"] for r in conn.execute("SELECT status FROM documents ORDER BY created_at")]
         processed = conn.execute("SELECT COUNT(*) FROM audit_log WHERE actor = 'pipeline'").fetchone()[0]
     assert (statuses, processed) == (["ready", "ready", "ready"], 3)
+
+
+def test_stop_waits_for_in_flight_processing(mock_ctx, monkeypatch):
+    release = threading.Event()
+    finished = threading.Event()
+
+    async def main() -> None:
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+
+        def process(ctx, doc_id):
+            loop.call_soon_threadsafe(started.set)
+            if release.wait(timeout=5):
+                finished.set()
+
+        monkeypatch.setattr(queue_module, "process_document", process)
+        jobs = JobQueue(mock_ctx)
+        await jobs.start()
+        jobs.enqueue("active")
+        await asyncio.wait_for(started.wait(), timeout=5)
+        stop = asyncio.create_task(jobs.stop())
+        try:
+            done, _ = await asyncio.wait({stop}, timeout=0.05)
+            assert not done
+        finally:
+            release.set()
+            await asyncio.wait_for(stop, timeout=5)
+        assert finished.is_set()
+
+    asyncio.run(main())
 
 
 def test_a_worker_survives_an_exception(mock_ctx, monkeypatch):
